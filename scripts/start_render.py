@@ -40,7 +40,7 @@ def main():
     web_command = [
         sys.executable, '-m', 'gunicorn', 'app:app',
         '--config', str(ROOT / 'scripts' / 'gunicorn_conf.py'),
-        '--bind', f'0.0.0.0:{port}', '--workers', '1', '--threads', '2',
+        '--bind', f'0.0.0.0:{port}', '--worker-class', 'gthread', '--workers', '1', '--threads', '4',
         '--timeout', '60', '--graceful-timeout', '10',
         '--access-logfile', '-', '--error-logfile', '-',
     ]

@@ -3,7 +3,7 @@ import hmac
 import random
 import secrets
 from datetime import timedelta
-from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, session, url_for, flash
+from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, session, url_for, flash
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.dialects.postgresql import insert
 from .extensions import db
@@ -96,6 +96,10 @@ def result_data(attempt):
 
 @bp.get('/')
 def index():
+    # Render's port detector issues HEAD /. Do not make availability depend on
+    # PostgreSQL (the normal GET below performs several catalogue queries).
+    if request.method == 'HEAD':
+        return Response(status=200)
     try:
         projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
         counts = available_question_counts(projects)
