@@ -1,12 +1,13 @@
 import os
 import subprocess
 import sys
+import time
 from datetime import timedelta
 
 from sqlalchemy.exc import OperationalError
 
 from scripts.migrate import prepare_database
-from scripts import start_render
+from scripts import gunicorn_conf, start_render
 from glorax.extensions import db
 from glorax.jobs import enqueue_refresh, safe_job_error, worker_diagnostics, worker_heartbeat
 from glorax.models import Job, Setting, utcnow
@@ -49,60 +50,40 @@ def test_queue_health_and_safe_database_error(app):
     assert 'secret' not in message and 'do-not-show' not in message
 
 
-def capture_children(monkeypatch):
-    real_popen=subprocess.Popen
-    children=[]
-    def popen(*args,**kwargs):
-        child=real_popen(*args,**kwargs);children.append(child);return child
-    monkeypatch.setattr(start_render.subprocess,'Popen',popen)
-    return children
-
-
 def command(code):
     return [sys.executable,'-c',code]
 
 
-def test_migration_failure_prevents_web_and_worker(monkeypatch):
-    children=capture_children(monkeypatch)
-    assert start_render.serve([('web',command('raise AssertionError'))],os.environ.copy(),command('raise SystemExit(2)'),poll_seconds=0.01)==1
-    assert len(children)==1 and children[0].returncode==2
+def test_migration_failure_prevents_gunicorn_exec():
+    executed=[]
+    result=start_render.prepare_and_exec(os.environ.copy(),command('raise SystemExit(2)'),command('raise AssertionError'),exec_fn=lambda *args: executed.append(args))
+    assert result==2 and not executed
 
 
-def test_migration_before_children_and_worker_failure_restarts_only_worker(monkeypatch,tmp_path):
+def test_migration_completes_before_gunicorn_exec(tmp_path):
     marker=tmp_path/'migrated'
-    worker_starts=tmp_path/'worker-starts'
-    children=capture_children(monkeypatch)
+    executed=[]
     prepare=command(f'from pathlib import Path; Path({str(marker)!r}).write_text("done")')
-    web=command(f'''import os,time
-from pathlib import Path
-assert Path({str(marker)!r}).exists()
-deadline=time.monotonic()+10
-while time.monotonic()<deadline:
-    path=Path({str(worker_starts)!r})
-    if path.exists() and path.read_text() == "2":
-        os.kill(os.getppid(), __import__('signal').SIGTERM)
-        break
-    time.sleep(0.01)
-else:
-    raise SystemExit("worker was not restarted")
-time.sleep(60)''')
-    worker=command(f'''import sys,time
-from pathlib import Path
-path=Path({str(worker_starts)!r})
-starts=int(path.read_text()) if path.exists() else 0
-path.write_text(str(starts+1))
-if starts == 0: raise SystemExit(3)
-time.sleep(60)''')
-    assert start_render.serve([('web',web),('worker',worker)],os.environ.copy(),prepare,poll_seconds=0.01)==0
-    assert len(children)==4
-    assert children[1].returncode is not None
-    assert children[2].returncode==3
-    assert children[3].returncode is not None
+    web=command('pass')
+    def fake_exec(program,args,env):
+        assert marker.read_text()=='done';executed.append((program,args,env))
+        raise RuntimeError('exec called')
+    try: start_render.prepare_and_exec(os.environ.copy(),prepare,web,exec_fn=fake_exec)
+    except RuntimeError as exc: assert str(exc)=='exec called'
+    assert executed and executed[0][1]==web
 
 
-def test_render_stop_signal_stops_both_services(monkeypatch):
-    children=capture_children(monkeypatch)
-    web=command('import time; time.sleep(60)')
-    worker=command('import os,signal,time; time.sleep(0.1); os.kill(os.getppid(),signal.SIGTERM); time.sleep(60)')
-    assert start_render.serve([('web',web),('worker',worker)],os.environ.copy(),command('pass'),poll_seconds=0.01)==0
-    assert len(children)==3 and all(p.poll() is not None for p in children)
+def test_worker_failure_restarts_without_stopping_gunicorn(tmp_path):
+    starts=tmp_path/'starts'
+    command_line=command(f'''import time
+from pathlib import Path
+p=Path({str(starts)!r}); n=int(p.read_text()) if p.exists() else 0; p.write_text(str(n+1))
+if n==0: raise SystemExit(3)
+time.sleep(60)''')
+    supervisor=gunicorn_conf.WorkerSupervisor(command_line)
+    supervisor.start()
+    deadline=time.monotonic()+5
+    while time.monotonic()<deadline and (not starts.exists() or starts.read_text()!='2'): time.sleep(0.02)
+    assert starts.read_text()=='2'
+    supervisor.stop(grace_seconds=1)
+    assert supervisor.child.poll() is not None
