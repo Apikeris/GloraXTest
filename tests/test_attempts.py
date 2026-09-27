@@ -3,7 +3,7 @@ from datetime import timedelta
 import copy
 from glorax.extensions import db
 from glorax.models import Attempt,AttemptItem,Question,QuestionRevision,Project,Participant,utcnow,aware
-from glorax.attempts import sweep_expired
+from glorax.attempts import sweep_expired, available_question_counts
 
 
 def start(client,project,name='Тестовый Сотрудник',code=''):
@@ -116,3 +116,13 @@ def test_topic_and_count_limit_no_duplicates(app,client,seeded):
     assert response.location=='/'
     aid=start(client,seeded['project_ids'][0])
     with app.app_context():assert db.session.get(Attempt,aid).total==1
+
+
+def test_catalogue_counts_use_published_facts_and_apply_settings(app,seeded):
+    with app.app_context():
+        project=db.session.get(Project,seeded['project_ids'][0])
+        assert available_question_counts([project]) == {project.id: 2}
+        project.topic_distribution={'location':5}
+        project.question_limit=1
+        db.session.commit()
+        assert available_question_counts([project]) == {project.id: 1}
