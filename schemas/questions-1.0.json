@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:glorax:question-import:1.0",
+  "title": "Импорт вопросов GloraX 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_version",
+    "questions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "dataset_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 36
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    }
+  },
+  "$defs": {
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "external_id",
+        "project_key",
+        "type",
+        "category",
+        "text",
+        "target_fact_revision_id",
+        "options",
+        "correct_option_id",
+        "explanation",
+        "difficulty",
+        "tags"
+      ],
+      "properties": {
+        "external_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
+        "project_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "type": {
+          "const": "single_choice"
+        },
+        "category": {
+          "enum": [
+            "location",
+            "geography",
+            "general",
+            "overview",
+            "prices",
+            "specifications",
+            "layouts",
+            "architecture",
+            "infrastructure",
+            "transport",
+            "amenities",
+            "timeline",
+            "buildings",
+            "features",
+            "expert",
+            "finishing",
+            "security",
+            "courtyards",
+            "parking",
+            "storage",
+            "entrances"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 500
+        },
+        "target_fact_revision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 36
+        },
+        "options": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "fact_revision_id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "fact_revision_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36
+              }
+            }
+          }
+        },
+        "correct_option_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 36
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000
+        },
+        "difficulty": {
+          "enum": [
+            "basic",
+            "intermediate",
+            "advanced"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        }
+      }
+    }
+  }
+}

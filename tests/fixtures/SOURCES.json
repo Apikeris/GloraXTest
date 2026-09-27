@@ -1,0 +1,12 @@
+{
+  "catalog.html.gz": {
+    "url": "https://glorax.com/projects",
+    "captured_at": "2026-09-27T00:56:23.618453+00:00",
+    "description": "Полный публичный HTML. Динамический каталог с 29 строками, хотя в HTML видно 9 карточек."
+  },
+  "moskovsky.html.gz": {
+    "url": "https://glorax.com/projects/glorax-urickogo",
+    "captured_at": "2026-09-27T00:57:09.944141+00:00",
+    "description": "Полный HTML Московского с общими меню и другими проектами; регрессионный тест принадлежности фактов."
+  }
+}

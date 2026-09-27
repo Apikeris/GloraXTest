@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="admin-top"><h1>{% block heading %}Управление обучением{% endblock %}</h1><p class="muted">Администратор · время: Москва (UTC+3)</p></div>
+<nav class="admin-nav" aria-label="Разделы администратора">
+<a href="{{ url_for('admin.dashboard') }}">Обзор</a><a href="{{ url_for('admin.attempts') }}">Попытки</a><a href="{{ url_for('admin.participants') }}">Участники</a><a href="{{ url_for('admin.analytics') }}">Результаты</a><a href="{{ url_for('admin.projects') }}">Проекты и факты</a><a href="{{ url_for('admin.questions') }}">Вопросы</a><a href="{{ url_for('admin.import_questions') }}">Импорт JSON</a><a href="{{ url_for('admin.prompt_export') }}">Промпт для нейросети</a><a href="{{ url_for('admin.jobs') }}">Обновления</a><a href="{{ url_for('admin.settings') }}">Настройки</a><a href="{{ url_for('admin.audit_log') }}">Журнал</a>
+</nav>
+{% block admin_content %}{% endblock %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='admin.js') }}" defer></script>{% endblock %}
