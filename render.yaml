@@ -8,7 +8,10 @@ services:
     buildCommand: pip install -r requirements.txt
     # Keep scraping out of this free web instance: the worker can starve HTTP
     # health checks while a long refresh is running.
-    startCommand: exec gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
+    # Preload the Flask app before Gunicorn binds the public port. Without
+    # preload, Render can probe the listening master while its only worker is
+    # still importing the app and incorrectly time out its 5-second healthcheck.
+    startCommand: exec gunicorn app:app --preload --worker-class sync --bind 0.0.0.0:$PORT --workers 1 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'
     envVars:
