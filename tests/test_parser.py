@@ -97,6 +97,43 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
     assert metrics['section_count']['value'] == '5'
 
 
+def test_complete_infrastructure_map_yields_only_exact_count_facts():
+    row = {"id": 9, "projectSlug": "sample", "projectName": "Проект", "cityName": "Москва",
+           "tags": [], "hidePriceFlg": True, "flatType": []}
+    places = [{"id": 1, "name": "Парк", "categoryType": "relaxSites",
+               "transportAvailability": {"timeTo": 10, "transportType": "car"}},
+              {"id": 2, "name": "Сквер", "categoryType": "relaxSites",
+               "transportAvailability": {"timeTo": 15, "transportType": "pedestrian"}},
+              {"id": 3, "name": "Магазин", "categoryType": "shops"}]
+    detail = {"infrastructure": {"objectCount": 3, "mapList": places}}
+    facts = normalize_project(row, detail, '2026-09-27T01:00:00+00:00')['facts']
+    counts = [f for f in facts if f['key'] == 'nearby_category_count']
+    assert {(f['conditions']['category_type'], f['value']) for f in counts} == {
+        ('all', '3'), ('relaxSites', '2'), ('shops', '1')}
+    assert all(f['verification_status'] == 'verified' and f['is_exclusive'] for f in counts)
+    travel = [f for f in facts if f['key'] == 'travel_time']
+    assert {(f['value'], f['conditions']['destination'], f['conditions']['mode']) for f in travel} == {
+        ('10', 'Парк', 'car'), ('15', 'Сквер', 'pedestrian')}
+    # A list that does not match the source total is partial: emit no counts.
+    detail['infrastructure']['objectCount'] = 4
+    partial = normalize_project(row, detail, '2026-09-27T01:00:00+00:00')['facts']
+    assert not any(f['key'] == 'nearby_category_count' for f in partial)
+    # Duplicate IDs also invalidate the completeness proof.
+    detail['infrastructure'] = {"objectCount": 3, "mapList": [places[0], places[0], places[2]]}
+    duplicate = normalize_project(row, detail, '2026-09-27T01:00:00+00:00')['facts']
+    assert not any(f['key'] == 'nearby_category_count' for f in duplicate)
+    # Duplicate place names with different reported times cannot create two
+    # indistinguishable question prompts with competing correct answers.
+    detail['infrastructure'] = {"objectCount": 3, "mapList": [
+        {"id": 10, "name": "Один парк", "categoryType": "relaxSites",
+         "transportAvailability": {"timeTo": 10, "transportType": "car"}},
+        {"id": 11, "name": "Один парк", "categoryType": "relaxSites",
+         "transportAvailability": {"timeTo": 15, "transportType": "car"}},
+        {"id": 12, "name": "Магазин", "categoryType": "shops"}]}
+    duplicate_names = normalize_project(row, detail, '2026-09-27T01:00:00+00:00')['facts']
+    assert not any(f['key'] == 'travel_time' for f in duplicate_names)
+
+
 def test_pdf_text_extraction_is_bounded_and_page_attributed():
     from io import BytesIO
     from pypdf import PdfWriter
@@ -109,6 +146,15 @@ def test_pdf_text_extraction_is_bounded_and_page_attributed():
     assert extract_pdf_text(content) == []  # image/scanned PDFs are not guessed or OCR'd
     with pytest.raises(SourceError, match='не PDF'):
         extract_pdf_text(b'<html>Not a PDF</html>')
+
+
+def test_booklet_metadata_supports_project_landing_shape():
+    from glorax.parser import document_url_and_size
+    direct = {"title": "Буклет", "url": "https://cms-dev.city-digital.ru/booklet.pdf", "size": "1234"}
+    nested = {"title": "Буклет", "link": {"url": "https://cms-dev.city-digital.ru/other.pdf", "size": 5678}}
+    assert document_url_and_size(direct) == (direct['url'], '1234')
+    assert document_url_and_size(nested) == (nested['link']['url'], 5678)
+    assert document_url_and_size(None) == (None, None)
 
 
 def test_pdf_collector_only_reads_robot_allowed_linked_assets():
@@ -125,6 +171,8 @@ def test_pdf_collector_only_reads_robot_allowed_linked_assets():
         client.get_booklet_pdf('https://attacker.example/assets/00000000-0000-0000-0000-000000000000.pdf')
     with pytest.raises(SourceError, match='robots'):
         client.get_booklet_pdf('https://cms-dev.city-digital.ru/assets/00000000-0000-0000-0000-000000000000.pdf')
+    with pytest.raises(SourceError, match='некорректный размер'):
+        client.get_booklet_pdf('https://cms-dev.city-digital.ru/assets/00000000-0000-0000-0000-000000000000.pdf', 'not-a-size')
 
 
 def test_discovered_pagination_followed_without_guessing_urls():

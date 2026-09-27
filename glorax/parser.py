@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from urllib.parse import urljoin, urlsplit, parse_qs
 
 from bs4 import BeautifulSoup, SoupStrainer
@@ -249,6 +250,14 @@ def parse_landing(html, slug, final_url):
             "_structured_details_available":bool(chosen)}
 
 
+def document_url_and_size(document):
+    """Read the linked-document shapes used by both detail pages and landings."""
+    if not isinstance(document, dict):
+        return None, None
+    link = document.get("link") if isinstance(document.get("link"), dict) else {}
+    return link.get("url") or document.get("url"), link.get("size") or document.get("size")
+
+
 class RobotsRules:
     """Wildcard-aware robots rules (longest rule wins; Allow wins a tie)."""
     def __init__(self, content):
@@ -360,8 +369,13 @@ class HTTPClient:
         if (parsed.scheme != "https" or parsed.hostname != BOOKLET_HOST or parsed.query or
                 not re.fullmatch(r"/assets/[0-9a-fA-F-]{36}\.pdf", parsed.path)):
             raise SourceError("Документ не является безопасной ссылкой на PDF-буклет GloraX")
-        if expected_size and (expected_size < 1 or expected_size > MAX_BOOKLET_BYTES):
-            raise SourceError(f"Размер буклета превышает ограничение {MAX_BOOKLET_BYTES // (1024 * 1024)} MiB")
+        if expected_size not in (None, ""):
+            try:
+                expected_size = int(expected_size)
+            except (TypeError, ValueError) as exc:
+                raise SourceError("Источник указал некорректный размер PDF") from exc
+            if expected_size < 1 or expected_size > MAX_BOOKLET_BYTES:
+                raise SourceError(f"Размер буклета превышает ограничение {MAX_BOOKLET_BYTES // (1024 * 1024)} MiB")
         if self.document_downloaded_bytes + (expected_size or 0) > MAX_BOOKLET_BYTES_PER_REFRESH:
             raise SourceError("Достигнут лимит загрузки буклетов на один сбор; оставшиеся PDF перенесены на следующий запуск")
         if self.document_unavailable:
@@ -626,10 +640,55 @@ def normalize_project(row, detail=None, fetched_at=None):
             travel = place.get("transportAvailability") or {}
             value = {"name": clean_text(place.get("name")), "minutes": travel.get("timeTo"), "transport_mode": travel.get("transportType"), "state": "not_verified"}
             facts.append(make_fact("infrastructure", "nearby_" + str(place.get("id")), value, url, place, value_type="json", verified=False, exclusive=False))
+        # Exact counts are useful, project-scoped quiz facts only when the
+        # site's own total proves that its map list is complete. An empty or
+        # truncated list must never be interpreted as zero.
+        infrastructure = detail.get("infrastructure") or {}
+        map_list = infrastructure.get("mapList") or []
+        object_count = infrastructure.get("objectCount")
+        valid_map = (isinstance(object_count, int) and not isinstance(object_count, bool)
+                     and object_count > 0 and len(map_list) == object_count
+                     and all(isinstance(place, dict) and place.get("id") is not None
+                             and clean_text(place.get("name")) and clean_text(place.get("categoryType"))
+                             for place in map_list)
+                     and len({str(place["id"]) for place in map_list}) == len(map_list))
+        if valid_map:
+            destination_names = Counter(unicodedata.normalize("NFKC", clean_text(place["name"])).casefold()
+                                        for place in map_list)
+            for place in map_list:
+                travel = place.get("transportAvailability") or {}
+                minutes, mode, destination = travel.get("timeTo"), clean_text(travel.get("transportType")), clean_text(place.get("name"))
+                destination_key = unicodedata.normalize("NFKC", destination).casefold() if destination else ""
+                if (isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0
+                        and mode and destination and destination_names[destination_key] == 1):
+                    facts.append(make_fact("transport", "travel_time", str(minutes), url, place,
+                                           value_type="integer", unit="мин", exclusive=True,
+                                           scope={"level": "destination", "id": str(place["id"]), "name": destination},
+                                           conditions={"basis": "project_infrastructure_map", "destination": destination,
+                                                       "mode": mode, "map_category_type": clean_text(place.get("categoryType"))}))
+            count_groups = {"all": ("объектов", len(map_list))}
+            labels = {"shops": "магазинов и торговых объектов", "relaxSites": "мест отдыха",
+                      "kinderGardens": "детских садов", "sport": "спортивных объектов",
+                      "medicine": "медицинских учреждений", "education": "образовательных учреждений",
+                      "additionalEducation": "организаций дополнительного образования",
+                      "restaurants": "ресторанов и кафе", "transport": "транспортных объектов",
+                      "culture": "культурных объектов"}
+            category_counts = Counter(clean_text(place.get("categoryType")) for place in map_list)
+            for category_type, count in category_counts.items():
+                if category_type in labels:
+                    count_groups[category_type] = (labels[category_type], count)
+            for category_type, (label, count) in count_groups.items():
+                facts.append(make_fact("infrastructure", "nearby_category_count", str(count), url,
+                                       {"objectCount": object_count, "mapList_ids": [str(p["id"]) for p in map_list],
+                                        "matched_count": count, "category_type": category_type,
+                                        "category_label": label, "completeness_check": "objectCount_equals_unique_mapList_ids"},
+                                       value_type="integer", verified=True, exclusive=True,
+                                       conditions={"basis": "complete_project_infrastructure_map", "category_type": category_type,
+                                                   "category_label": label}))
         for document in detail.get("documents") or []:
             if isinstance(document, dict):
-                link = document.get("link") or {}
-                coverage["documents_for_review"].append({"title": clean_text(document.get("title")), "url": link.get("url"), "reason": "PDF не интерпретируется автоматически; требуется извлечение и проверка"})
+                document_url, _ = document_url_and_size(document)
+                coverage["documents_for_review"].append({"title": clean_text(document.get("title")), "url": document_url, "reason": "PDF не интерпретируется автоматически; требуется извлечение и проверка"})
         hero_price = (detail.get("hero") or {}).get("minPrice")
         if hero_price is not None:
             coverage["source_conflicts"].append({"field": "price", "catalog_rub": price, "detail_hero_raw": hero_price,
@@ -755,12 +814,13 @@ def scrape(progress=None, client=None):
             booklet = next((document for document in document_rows if isinstance(document, dict) and
                             "буклет" in (clean_text(document.get("title")) or "").casefold()), None)
             if booklet:
-                link = booklet.get("link") or {}
-                booklet_url = link.get("url")
+                booklet_url, declared_size = document_url_and_size(booklet)
                 doc_report = {"title": clean_text(booklet.get("title")), "url": booklet_url,
-                              "declared_size": link.get("size"), "status": "pending_review"}
+                              "declared_size": declared_size, "status": "pending_review"}
                 try:
-                    pdf = client.get_booklet_pdf(booklet_url, link.get("size"))
+                    if not booklet_url:
+                        raise SourceError("В источнике нет URL буклета")
+                    pdf = client.get_booklet_pdf(booklet_url, declared_size)
                     pages = extract_pdf_text(pdf)
                     extracted = {"pages": pages, "page_count": len(pages),
                                  "text_status": "extracted" if pages else "no_text_layer",

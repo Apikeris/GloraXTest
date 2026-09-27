@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from .extensions import db
 from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Question, QuestionRevision, utcnow, uid
 
-TEMPLATE_VERSION = "scalar-4"
+TEMPLATE_VERSION = "scalar-5"
 VERIFIED = {"verified", "manual_verified"}
 CATEGORIES = {
     "location": "Расположение", "geography": "География", "general": "Общие сведения", "overview": "О проекте",
@@ -62,9 +62,10 @@ TEMPLATES = {
     "courtyard_area": "Какова площадь двора проекта «{project}»{scope}{conditions}?",
     "park_area": "Какова площадь парка проекта «{project}»{scope}{conditions}?",
     "distance": "Какое расстояние указано для проекта «{project}»{scope}{conditions}?",
-    "travel_time": "Какое время в пути указано для проекта «{project}»{scope}{conditions}?",
+    "travel_time": "Какое время в пути до объекта на карте указано для проекта «{project}»{conditions}?",
     "nearest_transport_station": "Какой транспортный объект указан в каталоге для проекта «{project}»{scope}{conditions}?",
     "nearest_transport_minutes": "Какое время в пути указано в каталоге для проекта «{project}»{scope}{conditions}?",
+    "nearby_category_count": "Сколько {category} перечислено на карте инфраструктуры проекта «{project}»?",
     "advertised_min_price": "Какова заявленная минимальная полная стоимость в проекте «{project}»{scope}{conditions}{date}?",
     "min_price": "Какова минимальная полная стоимость в проекте «{project}»{scope}{conditions}{date}?",
     "max_price": "Какова максимальная полная стоимость в проекте «{project}»{scope}{conditions}{date}?",
@@ -186,7 +187,7 @@ def _context(revision):
         "offer_count", "collection_started_at", "collection_finished_at", "complete", "sample_complete",
         "snapshot_date", "as_of", "source_label", "missing_reason", "quality", "currency",
     }}
-    if fact.key in {"nearest_transport_station", "nearest_transport_minutes"}:
+    if fact.key in {"nearest_transport_station", "nearest_transport_minutes", "travel_time", "distance"}:
         semantic_conditions.pop("destination", None)
     scope_kind = scope.get("type", scope.get("level", "project"))
     return (fact.category, fact.key, canonical_unit(revision.unit), scope_kind,
@@ -354,7 +355,10 @@ def make_text(target, project):
         raise ValueError("Нет проверенного шаблона для этой характеристики")
     if fact.key in {"distance", "travel_time", "nearest_transport_minutes"} and not ((target.conditions or {}).get("destination") and ((target.conditions or {}).get("mode") or (target.conditions or {}).get("transport_mode"))):
         raise ValueError("Для транспортного вопроса нужны место назначения и способ передвижения")
-    return template.format(project=project.name, scope=_scope_text(fact),
+    category = (target.conditions or {}).get("category_label")
+    if fact.key == "nearby_category_count" and not category:
+        raise ValueError("Для подсчёта объектов не указана категория карты")
+    return template.format(project=project.name, scope=_scope_text(fact), category=category or "",
                            date=f" по данным на {_aware(target.created_at).strftime('%d.%m.%Y')}",
                            conditions=_conditions_text(target))
 
