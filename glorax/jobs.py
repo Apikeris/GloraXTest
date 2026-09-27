@@ -75,7 +75,8 @@ def recover_jobs():
 def claim_job():
     job=db.session.execute(db.select(Job).where(Job.state=='queued',Job.available_at<=utcnow()).order_by(Job.created_at).with_for_update(skip_locked=True).limit(1)).scalar_one_or_none()
     if not job: db.session.rollback();return None
-    job.state='running';job.started_at=utcnow();job.heartbeat_at=utcnow();job.lease_token=uid();job.attempts+=1;job.stage='Обнаружение проектов'
+    job.state='running';job.started_at=utcnow();job.heartbeat_at=utcnow();job.lease_token=uid();job.attempts+=1;job.stage='Обнаружение проектов';job.error=None
+    job.report={key:value for key,value in (job.report or {}).items() if key not in ('last_error','failed_stage')}
     result=(job.id,job.lease_token);db.session.commit();return result
 
 

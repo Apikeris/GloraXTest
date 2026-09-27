@@ -6,15 +6,19 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 from flask import current_app
 from .extensions import db
-from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Source, Setting, Question, QuestionRevision, utcnow, aware
+from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Source, Setting, Question, QuestionRevision, utcnow, aware, uid
 
 
 def get_setting(key,default=None):
-    row=db.session.get(Setting,key)
-    return row.value if row else default
+    cache=db.session.info.setdefault('glorax_settings_cache',{})
+    if key not in cache:
+        row=db.session.get(Setting,key)
+        cache[key]=row.value if row else default
+    return cache[key]
 
 
 def set_setting(key,value):
+    db.session.info.setdefault('glorax_settings_cache',{})[key]=value
     row=db.session.get(Setting,key)
     if row: row.value=value
     else: db.session.add(Setting(key=key,value=value))
@@ -59,12 +63,12 @@ def _revision(fact,snapshot,payload,source=None,author=None):
     created=parse_date(payload.get('fetched_at'))
     configured=get_setting('price_valid_days',7) if fact.category=='prices' else get_setting('fact_valid_days',180)
     days=int(configured) if fact.category=='prices' else min(int(payload['valid_days']),int(configured)) if payload.get('valid_days') else int(configured)
-    row=FactRevision(fact_id=fact.id,dataset_id=snapshot.id,value=value,numeric_value=numeric,value_type=value_type,
+    row=FactRevision(id=uid(),fact_id=fact.id,dataset_id=snapshot.id,value=value,numeric_value=numeric,value_type=value_type,
         unit=payload.get('unit'),source_id=source.id if source else None,source_url=payload.get('source_url'),evidence=payload.get('evidence'),
         method=payload.get('method','http'),verification_status=verified,is_exclusive=bool(payload.get('is_exclusive',False)),
         missing_reason=payload.get('missing_reason') or ('Источник не содержит значение' if value is None else None),conditions=payload.get('conditions') or {},
         created_at=created,valid_until=created+timedelta(days=int(days)),author_id=author)
-    db.session.add(row);db.session.flush();return row
+    db.session.add(row);return row
 
 
 def _invalidate_questions(changed_ids):
@@ -82,11 +86,18 @@ def publish_collection(collection,job_guard=None):
     if db.engine.dialect.name=='postgresql': db.session.execute(db.text('SELECT pg_advisory_xact_lock(73192041)'))
     if job_guard: job_guard()
     snapshot,members=_new_snapshot({'coverage':collection.get('coverage',{}),'errors':collection.get('errors',[]),'started_at':collection.get('started_at'),'finished_at':collection.get('finished_at')})
-    changes=[];new=[];conflicts=[];replaced=set()
+    changes=[];new=[];conflicts=[];replaced=set();fact_heads={}
+    projects_by_key={p.key:p for p in db.session.execute(db.select(Project)).scalars()}
+    facts_by_identity={}
+    current_revision_ids=set()
+    for fact in db.session.execute(db.select(Fact)).scalars():
+        facts_by_identity[(fact.project_id,fact.key,fact.scope_key)]=fact
+        if fact.current_revision_id: current_revision_ids.add(fact.current_revision_id)
+    current_revisions={r.id:r for r in db.session.execute(db.select(FactRevision).where(FactRevision.id.in_(current_revision_ids))).scalars()} if current_revision_ids else {}
     for data in collection['projects']:
-        project=db.session.execute(db.select(Project).where(Project.key==data['key'])).scalar_one_or_none()
+        project=projects_by_key.get(data['key'])
         if not project:
-            project=Project(key=data['key'],name=data['name']);db.session.add(project);db.session.flush();new.append(project.name)
+            project=Project(id=uid(),key=data['key'],name=data['name']);db.session.add(project);db.session.flush();projects_by_key[project.key]=project;new.append(project.name)
         elif any(getattr(project,k)!=data.get(k) for k in ('name','city','region','status')): changes.append(project.name)
         for field in ('name','canonical_url','city','region','status'):
             if data.get(field) is not None: setattr(project,field,data[field])
@@ -95,15 +106,20 @@ def publish_collection(collection,job_guard=None):
         for raw in data.get('sources',[]):
             content=raw.get('content','')
             if not isinstance(content,str): content=json.dumps(content,ensure_ascii=False)
-            source=Source(dataset_id=snapshot.id,project_id=project.id,url=raw['url'],content=content,content_type=raw.get('content_type','text/html'),checksum=hashlib.sha256(content.encode()).hexdigest(),fetched_at=parse_date(raw.get('fetched_at')))
-            db.session.add(source);db.session.flush();sources[source.url]=source
+            source=Source(id=uid(),dataset_id=snapshot.id,project_id=project.id,url=raw['url'],content=content,content_type=raw.get('content_type','text/html'),checksum=hashlib.sha256(content.encode()).hexdigest(),fetched_at=parse_date(raw.get('fetched_at')))
+            db.session.add(source);sources[source.url]=source
+        # Revisions refer to source IDs immediately. Persist this project's
+        # small source batch before queueing its many fact revisions.
+        if sources: db.session.flush()
         for candidate in data.get('facts',[]):
             scope=candidate.get('scope') or {};scope_key=digest(scope)
-            fact=db.session.execute(db.select(Fact).where(Fact.project_id==project.id,Fact.key==candidate['key'],Fact.scope_key==scope_key)).scalar_one_or_none()
+            identity=(project.id,candidate['key'],scope_key)
+            fact=facts_by_identity.get(identity)
             if not fact:
-                fact=Fact(project_id=project.id,key=candidate['key'],category=candidate['category'],scope=scope,scope_key=scope_key)
-                db.session.add(fact);db.session.flush()
-            old=db.session.get(FactRevision,fact.current_revision_id) if fact.current_revision_id else None
+                fact=Fact(id=uid(),project_id=project.id,key=candidate['key'],category=candidate['category'],scope=scope,scope_key=scope_key)
+                db.session.add(fact);facts_by_identity[identity]=fact
+            previous_id=fact_heads.get(fact.id,(None,fact.current_revision_id))[1]
+            old=current_revisions.get(previous_id) if previous_id else None
             source=sources.get(candidate.get('source_url'))
             candidate={**candidate,'fetched_at':source.fetched_at if source else collection.get('finished_at')}
             if fact.manual_override:
@@ -119,7 +135,11 @@ def publish_collection(collection,job_guard=None):
                 conflicts.append({'fact_id':fact.id,'revision_id':r.id,'reason':'Новый кандидат не подтверждён; сохранён старый факт с исходной датой.'})
                 continue
             if old: replaced.add(old.id)
-            fact.current_revision_id=r.id;fact.review_pending=False;members[fact.id]=r.id
+            fact_heads[fact.id]=(fact,r.id);fact.review_pending=False;members[fact.id]=r.id;current_revisions[r.id]=r
+    # First persist fact/revision/source rows in batches, with the old fact heads
+    # still pointing at published versions. The head FK is intentionally immediate.
+    db.session.flush()
+    for fact,rid in fact_heads.values(): fact.current_revision_id=rid
     _invalidate_questions(replaced)
     for revision_id in members.values(): db.session.add(DatasetFact(dataset_id=snapshot.id,revision_id=revision_id))
     db.session.flush()
@@ -146,6 +166,7 @@ def save_manual_fact(project_id,payload,author_id):
         fact=Fact(project_id=project_id,key=payload['key'],category=payload['category'],scope=scope,scope_key=digest(scope));db.session.add(fact);db.session.flush()
     payload={**payload,'method':payload.get('method') or 'manual'}
     r=_revision(fact,snapshot,payload,author=author_id)
+    db.session.flush()
     if fact.current_revision_id: _invalidate_questions({fact.current_revision_id})
     fact.current_revision_id=r.id;fact.manual_override=True;fact.review_pending=False;members[fact.id]=r.id
     for rid in members.values(): db.session.add(DatasetFact(dataset_id=snapshot.id,revision_id=rid))

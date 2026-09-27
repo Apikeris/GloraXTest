@@ -14,7 +14,7 @@ from datetime import timezone
 from decimal import Decimal, InvalidOperation
 
 from .extensions import db
-from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Question, QuestionRevision, utcnow
+from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Question, QuestionRevision, utcnow, uid
 
 TEMPLATE_VERSION = "scalar-3"
 VERIFIED = {"verified", "manual_verified"}
@@ -233,7 +233,10 @@ def validate_fact_options(target, revisions, dataset_id, require_current=True):
         errors.append("Нужно ровно четыре варианта")
     canonical, displayed = set(), set()
     project_name=normalize_text(db.session.get(Project,target_fact.project_id).name)
-    member_ids = {row.revision_id for row in DatasetFact.query.filter_by(dataset_id=dataset_id).all()}
+    cache=db.session.info.setdefault('glorax_dataset_members_cache',{})
+    if dataset_id not in cache:
+        cache[dataset_id]={row.revision_id for row in DatasetFact.query.filter_by(dataset_id=dataset_id).all()}
+    member_ids=cache[dataset_id]
     for index, revision in enumerate(revisions):
         prefix = f"Вариант {index + 1}: "
         errors += [prefix + error for error in freshness_errors(revision) + price_errors(revision)]
@@ -376,12 +379,21 @@ def generate_questions(dataset_id):
         if candidate.is_exclusive and not freshness_errors(candidate) and not price_errors(candidate) and facts_by_id[candidate.fact_id].current_revision_id == candidate.id:
             candidates_by_context.setdefault(_context(candidate), []).append(candidate)
     report = {"created": 0, "updated": 0, "unchanged": 0, "skipped": [], "needs_review": 0}
+    existing_questions=db.session.scalars(db.select(Question).where(Question.origin=='generated')).all()
+    questions_by_key={q.generation_key:q for q in existing_questions if q.generation_key}
+    questions_by_legacy_suffix={q.generation_key.rsplit(':',1)[-1]:q for q in existing_questions if q.generation_key and ':' in q.generation_key}
+    current_question_revisions={}
+    revision_ids={q.current_revision_id for q in existing_questions if q.current_revision_id}
+    if revision_ids:
+        current_question_revisions={r.id:r for r in db.session.scalars(db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids))).all()}
+    question_heads={}
+    pending_question_revisions={}
     for target in revisions:
         fact = facts_by_id[target.fact_id]
         key = f"fact:{fact.id}"
-        question = Question.query.filter_by(generation_key=key).first()
+        question = questions_by_key.get(key)
         if question is None:
-            question = Question.query.filter(Question.generation_key.like("%:"+fact.id), Question.origin=="generated").first()
+            question = questions_by_legacy_suffix.get(fact.id)
             if question: question.generation_key=key
         reasons = freshness_errors(target) + price_errors(target)
         if not target.is_exclusive or fact.key not in TEMPLATES or (fact.category == "expert" or target.method == "expert_assessment"):
@@ -426,24 +438,30 @@ def generate_questions(dataset_id):
             continue
         data = revision_data(target, distractors, project, dataset_id)
         content_hash = fingerprint({key: value for key, value in data.items() if key != "dataset_id"})
-        existing = db.session.get(QuestionRevision, question.current_revision_id) if question else None
+        existing = current_question_revisions.get(question.current_revision_id) if question else None
         if existing and existing.fingerprint == content_hash:
             report["unchanged"] += 1
             continue
         if question is None:
-            question = Question(project_id=fact.project_id, origin="generated", status="published", generation_key=key)
+            question = Question(id=uid(),project_id=fact.project_id, origin="generated", status="published", generation_key=key)
             db.session.add(question)
-            db.session.flush()
+            questions_by_key[key]=question
             report["created"] += 1
         else:
             report["updated"] += 1
-        revision = QuestionRevision(question_id=question.id, fingerprint=content_hash, **data)
+        revision = QuestionRevision(id=uid(),question_id=question.id, fingerprint=content_hash, **data)
         db.session.add(revision)
-        db.session.flush()
-        question.current_revision_id, question.status, question.review_reason = revision.id, "published", None
+        question_heads[question.id]=(question,revision.id)
+        pending_question_revisions[question.id]=revision
+        question.status, question.review_reason = "published", None
     # Existing manual/import questions are never rewritten after a source changes.
+    # Keep pointers at old revisions until all new question revisions exist; the
+    # PostgreSQL current-revision FK is intentionally not deferred.
+    db.session.flush()
+    for question,revision_id in question_heads.values(): question.current_revision_id=revision_id
+    db.session.flush()
     for question in Question.query.filter(Question.status == "published").all():
-        revision = db.session.get(QuestionRevision, question.current_revision_id)
+        revision = pending_question_revisions.get(question.id) or db.session.get(QuestionRevision, question.current_revision_id)
         if revision:
             errors = validate_revision(revision, semantic_review=True)
             if errors:
