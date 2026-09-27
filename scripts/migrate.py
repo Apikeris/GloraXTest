@@ -23,8 +23,11 @@ def prepare_database(app, enqueue_initial=False):
     with app.app_context():
         if db.engine.dialect.name=='postgresql':
             with db.engine.connect() as lock:
-                lock.execute(text('SELECT pg_advisory_lock(73192042)'))
+                acquired = lock.execute(text('SELECT pg_try_advisory_lock(73192042)')).scalar()
                 lock.commit()  # Session lock survives commit; avoid idle-in-transaction timeout.
+                if not acquired:
+                    print('Render: another migration owns the lock; retrying later', flush=True)
+                    return False
                 try:
                     migrate_and_seed()
                 finally:
@@ -32,10 +35,12 @@ def prepare_database(app, enqueue_initial=False):
                     lock.commit()
         else:
             migrate_and_seed()
+        return True
 
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--enqueue-initial-refresh', action='store_true')
     args=parser.parse_args()
-    prepare_database(create_app(), enqueue_initial=args.enqueue_initial_refresh)
+    if not prepare_database(create_app(), enqueue_initial=args.enqueue_initial_refresh):
+        raise SystemExit(75)

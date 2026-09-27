@@ -1,9 +1,4 @@
-"""Render Free entry point: migrate once, then replace this process with Gunicorn.
-
-Gunicorn must be the service's primary process so Render can reliably discover the
-HTTP socket. The queue process starts from a Gunicorn master hook after the socket
-is ready.
-"""
+"""Render Free entry point. Open the HTTP socket before touching PostgreSQL."""
 import os
 from pathlib import Path
 import subprocess
@@ -11,17 +6,6 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def prepare_and_exec(env, prepare_command, web_command, run=subprocess.run, exec_fn=os.execvpe):
-    print('Render: applying migrations before web start', flush=True)
-    result = run(prepare_command, cwd=ROOT, env=env, check=False)
-    if result.returncode != 0:
-        print('Render: database preparation failed; web was not started', flush=True)
-        return result.returncode or 1
-    print('Render: migrations complete; replacing launcher with Gunicorn', flush=True)
-    exec_fn(web_command[0], web_command, env)
-    raise RuntimeError('execvpe unexpectedly returned')
 
 
 def main():
@@ -44,8 +28,9 @@ def main():
         '--timeout', '60', '--graceful-timeout', '10',
         '--access-logfile', '-', '--error-logfile', '-',
     ]
-    prepare_command = [sys.executable, str(ROOT / 'scripts/migrate.py'), '--enqueue-initial-refresh']
-    return prepare_and_exec(env, prepare_command, web_command)
+    # Database migrations run from the Gunicorn master hook after this server has
+    # bound its socket. A slow or unavailable database must never hide /healthz.
+    os.execvpe(web_command[0], web_command, env)
 
 
 if __name__ == '__main__':

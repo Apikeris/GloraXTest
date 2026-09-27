@@ -11,8 +11,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class WorkerSupervisor:
-    def __init__(self, command=None, popen=subprocess.Popen):
+    def __init__(self, command=None, prepare_command=None, popen=subprocess.Popen):
         self.command = command or [sys.executable, '-m', 'glorax.worker', '--compact']
+        self.prepare_command = prepare_command or [sys.executable, str(ROOT / 'scripts/migrate.py'), '--enqueue-initial-refresh']
         self.popen = popen
         self.stop_event = threading.Event()
         self.child = None
@@ -25,6 +26,22 @@ class WorkerSupervisor:
     def _run(self):
         delay = 1
         while not self.stop_event.is_set():
+            print('Render: applying migrations in background; HTTP is already listening', flush=True)
+            preparation = self.popen(self.prepare_command, cwd=ROOT, env=os.environ.copy(), start_new_session=True)
+            self.child = preparation
+            while not self.stop_event.wait(0.5) and preparation.poll() is None:
+                pass
+            if self.stop_event.is_set():
+                break
+            code = preparation.wait()
+            if code != 0:
+                print(f'Render: database preparation failed ({code}); retrying in {delay}s', flush=True)
+                if self.stop_event.wait(delay):
+                    break
+                delay = min(delay * 2, 60)
+                continue
+            print('Render: migrations complete; starting durable queue worker', flush=True)
+            delay = 1
             self.child = self.popen(self.command, cwd=ROOT, env=os.environ.copy(), start_new_session=True)
             print('Render: worker started after web socket became ready', flush=True)
             while not self.stop_event.wait(0.5) and self.child.poll() is None:
