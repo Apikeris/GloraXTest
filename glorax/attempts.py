@@ -103,19 +103,19 @@ def index():
         return Response(status=200)
     stage_started = time.monotonic()
     try:
-        current_app.logger.info('Catalogue request started')
+        current_app.logger.warning('Catalogue request started')
         projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
-        current_app.logger.info('Catalogue stage=projects count=%d seconds=%.3f', len(projects), time.monotonic() - stage_started)
+        current_app.logger.warning('Catalogue stage=projects count=%d seconds=%.3f', len(projects), time.monotonic() - stage_started)
         stage_started = time.monotonic()
         counts = available_question_counts(projects)
-        current_app.logger.info('Catalogue stage=question_counts count=%d seconds=%.3f', sum(counts.values()), time.monotonic() - stage_started)
+        current_app.logger.warning('Catalogue stage=question_counts count=%d seconds=%.3f', sum(counts.values()), time.monotonic() - stage_started)
         stage_started = time.monotonic()
         cards=[]
         for project in projects:
             count = counts[project.id]
             cards.append({'project':project,'count':count,'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not count else None})
         dataset = latest_dataset()
-        current_app.logger.info('Catalogue stage=dataset seconds=%.3f', time.monotonic() - stage_started)
+        current_app.logger.warning('Catalogue stage=dataset seconds=%.3f', time.monotonic() - stage_started)
         return render_template('index.html',cards=cards,dataset=dataset)
     except SQLAlchemyError as exc:
         db.session.rollback()
