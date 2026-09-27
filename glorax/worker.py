@@ -3,9 +3,10 @@ import argparse
 import multiprocessing
 import signal
 import time
+import threading
 from . import create_app
 from .extensions import db
-from .jobs import recover_jobs,claim_job,run_job
+from .jobs import recover_jobs,claim_job,run_job,worker_heartbeat,safe_job_error
 from .attempts import sweep_expired
 
 
@@ -24,8 +25,11 @@ def queue(stop,once=False):
     app=create_app()
     with app.app_context():
         if db.engine.dialect.name!='postgresql': raise RuntimeError('Worker требует PostgreSQL.')
+        heartbeat_at=0
         while not stop.is_set():
             try:
+                if time.monotonic()-heartbeat_at>=15:
+                    worker_heartbeat();heartbeat_at=time.monotonic()
                 recover_jobs();job=claim_job()
                 if job:
                     succeeded=run_job(*job)
@@ -33,17 +37,26 @@ def queue(stop,once=False):
                 if once: sweep_expired();break
                 if not job: stop.wait(1)
             except Exception as exc:
-                db.session.rollback();app.logger.error('Worker iteration failed: %s',type(exc).__name__)
+                db.session.rollback();app.logger.error('Worker iteration failed: %s',safe_job_error(exc))
                 if once: raise
                 stop.wait(5)
             finally: db.session.remove()
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true');args=parser.parse_args()
-    ctx=multiprocessing.get_context('spawn');stop=ctx.Event()
-    if args.once: queue(stop,True);return
-    children=[ctx.Process(target=queue,args=(stop,),name='glorax-queue'),ctx.Process(target=maintenance,args=(stop,),name='glorax-timeouts')]
+    parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true')
+    parser.add_argument('--compact',action='store_true',help='Queue and timer threads in a dedicated worker process (Render Free)')
+    args=parser.parse_args()
+    if args.once: queue(threading.Event(),True);return
+    if args.compact:
+        # These threads live only in the separately supervised worker executable,
+        # never in Gunicorn. PostgreSQL, not a Python thread, owns job state.
+        stop=threading.Event()
+        children=[threading.Thread(target=queue,args=(stop,),name='glorax-queue',daemon=True),
+                  threading.Thread(target=maintenance,args=(stop,),name='glorax-timeouts',daemon=True)]
+    else:
+        ctx=multiprocessing.get_context('spawn');stop=ctx.Event()
+        children=[ctx.Process(target=queue,args=(stop,),name='glorax-queue'),ctx.Process(target=maintenance,args=(stop,),name='glorax-timeouts')]
     def terminate(*_): stop.set()
     signal.signal(signal.SIGTERM,terminate);signal.signal(signal.SIGINT,terminate)
     for child in children: child.start()
@@ -54,9 +67,10 @@ def main():
                 failed=True;stop.set()
     finally:
         for child in children: child.join(timeout=5)
-        for child in children:
-            if child.is_alive(): child.terminate()
-        for child in children: child.join(timeout=2)
+        if not args.compact:
+            for child in children:
+                if child.is_alive(): child.terminate()
+            for child in children: child.join(timeout=2)
     if failed: raise SystemExit(1)  # Render restarts supervisor; leases recover queued work.
 
 if __name__=='__main__': main()

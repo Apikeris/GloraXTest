@@ -1,12 +1,12 @@
-# Paid web + worker; Aiven is external, no Render database provisioned.
+# Render Free: web and worker subprocesses share the free service lifecycle.
+# Existing services: set Start Command manually; YAML does not update them automatically.
 services:
   - type: web
     name: glorax-knowledge-web
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python scripts/migrate.py
-    startCommand: gunicorn 'app:app' --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 60 --access-logfile - --error-logfile -
+    startCommand: python scripts/start_render.py
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'
     envVars:
@@ -22,28 +22,6 @@ services:
         value: /etc/secrets/aiven-ca.pem
       - key: TRUST_PROXY
         value: '1'
-      - key: DB_POOL_SIZE
-        value: '3'
-      - key: DB_MAX_OVERFLOW
-        value: '1'
-  - type: worker
-    name: glorax-knowledge-worker
-    runtime: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m glorax.worker
-    autoDeployTrigger: 'off'
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.13.5
-      - key: APP_ENV
-        value: production
-      - key: SECRET_KEY
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: PGSSLROOTCERT
-        value: /etc/secrets/aiven-ca.pem
       - key: DB_POOL_SIZE
         value: '2'
       - key: DB_MAX_OVERFLOW

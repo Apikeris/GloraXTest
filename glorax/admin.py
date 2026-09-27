@@ -431,8 +431,9 @@ def settings():
 
 @bp.get('/jobs')
 def jobs():
+    from .jobs import worker_diagnostics
     page = Job.query.order_by(Job.created_at.desc()).paginate(page=request.args.get('page', 1, type=int), per_page=20, error_out=False)
-    return render_template('admin_jobs.html', page=page)
+    return render_template('admin_jobs.html', page=page, worker=worker_diagnostics())
 
 
 @bp.post('/jobs/refresh')
@@ -459,14 +460,18 @@ def retry_job(job_id):
 
 @bp.get('/jobs/<job_id>')
 def job_detail(job_id):
-    return render_template('admin_job_detail.html', job=db.get_or_404(Job, job_id))
+    from .jobs import worker_diagnostics
+    job=db.get_or_404(Job, job_id)
+    return render_template('admin_job_detail.html', job=job, worker=worker_diagnostics(job))
 
 
 @bp.get('/jobs/<job_id>.json')
 def job_status(job_id):
+    from .jobs import worker_diagnostics
     job = db.get_or_404(Job, job_id)
     return jsonify(id=job.id, state=job.state, stage=job.stage, progress=job.progress, total=job.total,
-                   detail=job.detail, error=job.error, report=job.report,
+                   detail=job.detail, error=job.error, report=job.report, worker=worker_diagnostics(job),
+                   heartbeat_at=job.heartbeat_at.isoformat() if job.heartbeat_at else None,
                    started_at=job.started_at.isoformat() if job.started_at else None,
                    finished_at=job.finished_at.isoformat() if job.finished_at else None)
 

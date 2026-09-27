@@ -1,9 +1,52 @@
 """PostgreSQL queue: durable state, unique active job, leases and fencing."""
-from datetime import timedelta
-from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+import re
+from sqlalchemy.exc import IntegrityError, DBAPIError
+from sqlalchemy.dialects.postgresql import insert
 from flask import current_app
 from .extensions import db
-from .models import Job, utcnow, uid
+from .models import Job, Setting, utcnow, uid, aware
+
+
+def worker_heartbeat():
+    """A shared health timestamp, including when the durable queue is empty."""
+    value=utcnow().isoformat()
+    db.session.execute(insert(Setting).values(key='worker_queue_heartbeat',value=value).on_conflict_do_update(
+        index_elements=[Setting.key],set_={'value':value}))
+    db.session.commit()
+
+
+def worker_diagnostics(job=None):
+    row=db.session.get(Setting,'worker_queue_heartbeat')
+    seen=datetime.fromisoformat(row.value) if row else None
+    now=utcnow()
+    online=bool(seen and (now-aware(seen)).total_seconds()<60)
+    message='Worker подключён к очереди.' if online else 'Нет свежего сигнала worker. На Render Free используйте Start Command: python scripts/start_render.py. Во время сна сервиса задания не выполняются.'
+    if job is None:
+        job=db.session.scalar(db.select(Job).where(Job.active_key=='refresh'))
+    if job and job.state=='running' and job.heartbeat_at and (now-aware(job.heartbeat_at)).total_seconds()<current_app.config.get('WORKER_LEASE_SECONDS',600):
+        message='Сбор выполняется. Последний этап и время сигнала приведены ниже.'
+    if job and job.state=='queued' and aware(job.available_at)>now:
+        message='Ожидание автоматического повтора после ошибки. Для повтора worker должен оставаться запущенным.'
+    return {'online':online,'last_seen_at':seen.isoformat() if seen else None,'message':message}
+
+
+def safe_job_error(exc):
+    """SQLSTATE is useful diagnostics; raw SQL/driver messages can expose secrets."""
+    from .parser import SourceError
+    if isinstance(exc,DBAPIError):
+        state=getattr(exc.orig,'sqlstate',None) or getattr(exc.orig,'pgcode',None)
+        state=state if isinstance(state,str) and re.fullmatch(r'[0-9A-Z]{5}',state) else None
+        reason={
+            '53300':'Достигнут лимит подключений Aiven. Уменьшите DB_POOL_SIZE и DB_MAX_OVERFLOW.',
+            '53200':'PostgreSQL сообщил о нехватке памяти.',
+            '57014':'Запрос отменён или превысил серверный таймаут.',
+            '25P03':'PostgreSQL закрыл простаивающую транзакцию.',
+            '40P01':'Конфликт блокировок PostgreSQL; задание будет повторено.',
+            '57P01':'PostgreSQL перезапускается или остановлен.',
+        }.get(state,'Соединение с PostgreSQL прервано или запрос отклонён. Проверьте доступность Aiven и лимит подключений.')
+        return f'Ошибка БД ({type(exc).__name__}; SQLSTATE {state or "не получен"}): {reason}'
+    return str(exc)[:2000] if isinstance(exc,(ValueError,SourceError)) else 'Сбой обработки. Тип: '+type(exc).__name__
 
 
 def enqueue_refresh():
@@ -61,9 +104,9 @@ def run_job(job_id,token,collector=None):
         job=db.session.execute(db.select(Job).where(Job.id==job_id).with_for_update()).scalar_one_or_none()
         if job and job.lease_token==token and job.state=='running':
             # Do not expose exception messages from drivers (may contain credentials).
-            from .parser import SourceError
-            safe=str(exc)[:2000] if isinstance(exc,(ValueError,SourceError)) else 'Сбой обработки. Тип: '+type(exc).__name__
-            job.error=safe;job.report={**job.report,'last_error':safe}
+            safe=safe_job_error(exc)
+            current_app.logger.error('Refresh failed: job=%s stage=%s %s',job_id,job.stage,safe)
+            job.error=safe;job.report={**job.report,'last_error':safe,'failed_stage':job.stage}
             if job.attempts<current_app.config.get('WORKER_MAX_ATTEMPTS',3):
                 job.state='queued';job.stage='Ожидание повторной попытки';job.available_at=utcnow()+timedelta(seconds=30*job.attempts);job.lease_token=None
             else: job.state='failed';job.active_key=None;job.finished_at=utcnow();job.stage='Ошибка'

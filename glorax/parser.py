@@ -18,7 +18,7 @@ import re
 import time
 from urllib.parse import urljoin, urlsplit, parse_qs
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 import requests
 
 BASE_URL = "https://glorax.com"
@@ -71,7 +71,9 @@ def extract_flight(html):
     No JavaScript interpreter is used. Flight references can point at record
     properties; resolve only data references, with bounded depth/cycle checks.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    # Only script transport is needed; building the entire marketing-page DOM
+    # multiplies memory usage on a 512 MB web service.
+    soup = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer('script'))
     decoder = json.JSONDecoder()
     chunks = []
     for tag in soup.find_all("script"):
@@ -83,6 +85,7 @@ def extract_flight(html):
                 continue
             if isinstance(payload, list) and len(payload) == 2 and payload[0] == 1 and isinstance(payload[1], str):
                 chunks.append(payload[1])
+    soup.decompose()
     data = "".join(chunks).encode("utf-8")
     records, pos = {}, 0
     while pos < len(data):
@@ -138,7 +141,8 @@ def extract_flight(html):
             return [resolve(v, seen, depth + 1) for v in value]
         return None if value == "$undefined" else value
 
-    return [resolve(value) for value in records.values()]
+    # Resolve one record at a time instead of retaining every expanded React tree.
+    return (resolve(value) for value in records.values())
 
 
 def parse_catalog(html, url=CATALOG_URL):
@@ -152,7 +156,7 @@ def parse_catalog(html, url=CATALOG_URL):
     expected = catalog.get("projectsCnt")
     if not isinstance(expected, int) or expected < 1 or not unique:
         raise SourceError("Каталог не содержит достоверного счётчика проектов")
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer('a'))
     next_urls = []
     for element in soup.select('a[rel~="next"], a[data-next-page], a[aria-label="Следующая страница"]'):
         href = element.get("href") or element.get("data-next-page")
@@ -168,16 +172,17 @@ def parse_catalog(html, url=CATALOG_URL):
 
 
 def parse_detail(html, slug):
-    records = extract_flight(html)
-    candidates = [item["logs"] for record in records for item in walk_dicts(record)
-                  if isinstance(item.get("logs"), dict) and item["logs"].get("slug") == slug]
+    candidates, finishing_components = [], []
+    for record in extract_flight(html):
+        for item in walk_dicts(record):
+            if isinstance(item.get('logs'),dict) and item['logs'].get('slug')==slug:
+                candidates.append(item['logs'])
+            if item.get('slug')==slug and isinstance(item.get('data'),list) and any(isinstance(r,dict) and 'code' in r and 'lotsCount' in r for r in item['data']):
+                finishing_components.append(item)
     if not candidates:
         raise SourceError(f"Нет привязанного к проекту объекта logs.slug={slug}; меню не используется")
     detail = max(candidates, key=lambda item: len(json.dumps(item, ensure_ascii=False)))
     # These supplementary components are accepted only with an exact project slug.
-    finishing_components = [item for record in records for item in walk_dicts(record)
-                            if item.get("slug") == slug and isinstance(item.get("data"), list)
-                            and any(isinstance(r, dict) and "code" in r and "lotsCount" in r for r in item["data"])]
     detail = dict(detail)
     detail["_finishing_components"] = [r for item in finishing_components for r in item["data"]]
     return detail
@@ -189,18 +194,19 @@ def parse_landing(html, slug, final_url):
     A canonical URL plus exact projectSlug bind components to this project.
     Generic h1/menu are deliberately excluded (live pages have a wrong h1).
     """
-    soup=BeautifulSoup(html,"html.parser")
+    soup=BeautifulSoup(html,"html.parser",parse_only=SoupStrainer(['link','title','h1']))
     canonical=soup.select_one('link[rel="canonical"]')
     if not canonical or urlsplit(canonical.get("href", "")).path.rstrip("/") != urlsplit(final_url).path.rstrip("/"):
         raise SourceError("Лендинг не подтверждает canonical URL проекта")
-    objects=[obj for record in extract_flight(html) for obj in walk_dicts(record)]
-    scoped=[obj for obj in objects if obj.get("projectSlug")==slug and ("citySlug" in obj or "projectName" in obj)]
+    scoped,logs=[],[]
+    for record in extract_flight(html):
+        for obj in walk_dicts(record):
+            if obj.get('projectSlug')==slug and ('citySlug' in obj or 'projectName' in obj):
+                scoped.append(obj)
+            candidate=obj.get("logs")
+            if isinstance(candidate,dict) and parse_qs(urlsplit(candidate.get("projectFlatsUrl", "")).query).get("project")==[slug]:
+                logs.append(candidate)
     if not scoped: raise SourceError("Лендинг не содержит компонента с projectSlug каталога")
-    logs=[]
-    for obj in objects:
-        candidate=obj.get("logs")
-        if isinstance(candidate,dict) and parse_qs(urlsplit(candidate.get("projectFlatsUrl", "")).query).get("project")==[slug]:
-            logs.append(candidate)
     chosen=max(logs,key=lambda x:len(json.dumps(x,ensure_ascii=False))) if logs else {}
     return {"slug":slug,"_landing":True,"_landing_logs":chosen,"_project_components":scoped,
             "_landing_title":soup.title.get_text(" ",strip=True) if soup.title else None,
