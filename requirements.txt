@@ -9,3 +9,4 @@ requests==2.34.2
 beautifulsoup4==4.15.0
 jsonschema==4.26.0
 python-dotenv==1.2.3
+pypdf==6.19.0

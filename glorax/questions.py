@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from .extensions import db
 from .models import Dataset, DatasetFact, Fact, FactRevision, Project, Question, QuestionRevision, utcnow, uid
 
-TEMPLATE_VERSION = "scalar-3"
+TEMPLATE_VERSION = "scalar-4"
 VERIFIED = {"verified", "manual_verified"}
 CATEGORIES = {
     "location": "Расположение", "geography": "География", "general": "Общие сведения", "overview": "О проекте",
@@ -53,6 +53,10 @@ TEMPLATES = {
     "architecture_style": "Какой архитектурный стиль указан для проекта «{project}»{scope}?",
     "parking_spaces": "Сколько парковочных мест указано в проекте «{project}»{scope}{conditions}?",
     "storage_count": "Сколько кладовых указано в проекте «{project}»{scope}{conditions}?",
+    "land_area": "Какова площадь участка проекта «{project}»{scope}{conditions}?",
+    "landscaping_area": "Какова заявленная площадь благоустройства проекта «{project}»{scope}{conditions}?",
+    "section_count": "Сколько секций предусмотрено в проекте «{project}»{scope}?",
+    "construction_phase_count": "На сколько очередей разделено строительство проекта «{project}»{scope}?",
     "school_places": "На сколько мест рассчитана школа проекта «{project}»{scope}{conditions}?",
     "kindergarten_places": "На сколько мест рассчитан детский сад проекта «{project}»{scope}{conditions}?",
     "courtyard_area": "Какова площадь двора проекта «{project}»{scope}{conditions}?",
@@ -311,7 +315,9 @@ def _scope_text(fact):
         if scope.get(key):
             labels.append(f"{label}: {scope[key]}")
     if scope.get("rooms") is not None:
-        labels.append("студии" if str(scope["rooms"]) == "0" else "4 и более комнат" if str(scope["rooms"]) in {"4", "4+"} else f"комнат: {scope['rooms']}")
+        room_labels = {"0": "студии", "1": "1-комнатные", "2": "2-комнатные",
+                       "3": "3-комнатные", "4": "4-комнатные", "4+": "4 и более комнат"}
+        labels.append(room_labels.get(str(scope["rooms"]), f"комнат: {scope['rooms']}"))
     if scope.get("property_type"):
         labels.append({"flat": "квартиры", "apartment": "апартаменты"}.get(scope["property_type"], scope["property_type"]))
     if scope.get("level") in {"building", "queue"} and scope.get("name"):

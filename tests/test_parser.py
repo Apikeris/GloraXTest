@@ -63,13 +63,68 @@ def test_null_values_never_replaced_with_zero_or_other_projects():
 def test_marketing_minimum_is_not_maximum_or_complete_range():
     row = parse_catalog(fixture('catalog.html.gz'))['rows'][0]
     project = normalize_project(row)
-    facts = {f['key']: f for f in project['facts']}
+    facts = {f['key']: f for f in project['facts'] if not f['scope'].get('rooms')}
     minimum = facts['advertised_min_price']
     assert isinstance(minimum['value'], str)
     assert minimum['conditions']['basis'] == 'advertised_minimum'
     assert not minimum['conditions']['sample_complete']
     assert minimum['verification_status'] == 'needs_review'
     assert facts['max_price']['value'] is None
+
+
+def test_room_type_prices_and_project_metrics_create_scoped_facts():
+    row = {"id": 8, "projectSlug": "sample", "projectName": "Проект", "cityName": "Регион",
+           "tags": [{"label": "Скидка 10%"}], "hidePriceFlg": False,
+           "flatType": [{"type": "0", "typeSlug": "flat", "price": 4_000_000, "square": 28.5},
+                        {"type": "1", "typeSlug": "flat", "price": 4_500_000, "square": 31.2}]}
+    detail = {"aboutProject": {
+        "projectParams": [{"title": "5", "description": "Количество секций"},
+                          {"title": "7–12 этажей", "description": "Этажность"}],
+        "statistics": [{"title": "46,8 Га", "description": "площадь участка"},
+                       {"title": "4", "description": "очереди строительства"},
+                       {"title": "720", "description": "мест в 2 детских садах"},
+                       {"title": "1150", "description": "мест в школе"}]}}
+    facts = normalize_project(row, detail, '2026-09-27T01:00:00+00:00')['facts']
+    room_prices = [f for f in facts if f['key'] == 'advertised_min_price' and f['scope'].get('rooms')]
+    assert [(f['scope']['rooms'], f['value']) for f in room_prices] == [('0', '4000000'), ('1', '4500000')]
+    assert all(f['verification_status'] == 'verified' and f['conditions']['basis'] == 'advertised_minimum' for f in room_prices)
+    assert all(f['conditions']['price_basis'] == 'total' and f['conditions']['sample_complete'] is False for f in room_prices)
+    metrics = {f['key']: f for f in facts if f['key'] in {'land_area', 'construction_phase_count', 'kindergarten_places', 'school_places', 'section_count'}}
+    assert metrics['land_area']['value'] == '46.8' and metrics['land_area']['unit'] == 'га'
+    assert metrics['construction_phase_count']['value'] == '4'
+    assert metrics['kindergarten_places']['value'] == '720'
+    assert metrics['school_places']['value'] == '1150'
+    assert metrics['section_count']['value'] == '5'
+
+
+def test_pdf_text_extraction_is_bounded_and_page_attributed():
+    from io import BytesIO
+    from pypdf import PdfWriter
+    from glorax.parser import extract_pdf_text
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=300)
+    output = BytesIO()
+    writer.write(output)
+    content = output.getvalue()
+    assert extract_pdf_text(content) == []  # image/scanned PDFs are not guessed or OCR'd
+    with pytest.raises(SourceError, match='не PDF'):
+        extract_pdf_text(b'<html>Not a PDF</html>')
+
+
+def test_pdf_collector_only_reads_robot_allowed_linked_assets():
+    from glorax.parser import HTTPClient
+    import requests
+    client = HTTPClient.__new__(HTTPClient)
+    client.document_rules = RobotsRules('User-agent: *\nDisallow: /assets/')
+    client.document_robots_checked = True
+    client.document_unavailable = False
+    client.document_downloaded_bytes = 0
+    client.retries = 1
+    client.session = requests.Session()
+    with pytest.raises(SourceError, match='безопасной ссылкой'):
+        client.get_booklet_pdf('https://attacker.example/assets/00000000-0000-0000-0000-000000000000.pdf')
+    with pytest.raises(SourceError, match='robots'):
+        client.get_booklet_pdf('https://cms-dev.city-digital.ru/assets/00000000-0000-0000-0000-000000000000.pdf')
 
 
 def test_discovered_pagination_followed_without_guessing_urls():

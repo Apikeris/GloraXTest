@@ -12,6 +12,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
+from io import BytesIO
 import json
 import logging
 import re
@@ -25,6 +26,11 @@ BASE_URL = "https://glorax.com"
 CATALOG_URL = BASE_URL + "/projects"
 USER_AGENT = "GloraXKnowledgeCollector/1.0"
 LOG = logging.getLogger(__name__)
+BOOKLET_HOST = "cms-dev.city-digital.ru"  # actual document host linked from project pages
+MAX_BOOKLET_BYTES = 30 * 1024 * 1024
+MAX_BOOKLET_PAGES = 300
+MAX_BOOKLET_TEXT_CHARS = 1_500_000
+MAX_BOOKLET_BYTES_PER_REFRESH = 256 * 1024 * 1024
 
 
 class SourceError(RuntimeError):
@@ -188,6 +194,35 @@ def parse_detail(html, slug):
     return detail
 
 
+def extract_pdf_text(content, *, max_pages=MAX_BOOKLET_PAGES, max_chars=MAX_BOOKLET_TEXT_CHARS):
+    """Extract a bounded text layer from a linked PDF; never OCR or trust it as verified facts."""
+    if not content.startswith(b"%PDF-"):
+        raise SourceError("Ссылка на буклет вернула не PDF")
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(content), strict=False)
+        if len(reader.pages) > max_pages:
+            raise SourceError(f"В PDF больше {max_pages} страниц; текстовый разбор пропущен")
+        pages = []
+        chars = 0
+        for number, page in enumerate(reader.pages, 1):
+            text = clean_text(page.extract_text() or "")
+            if not text:
+                continue
+            text = text[:max_chars - chars]
+            if not text:
+                break
+            pages.append({"page": number, "text": text})
+            chars += len(text)
+            if chars >= max_chars:
+                break
+        return pages
+    except SourceError:
+        raise
+    except Exception as exc:
+        raise SourceError(f"Не удалось извлечь текст PDF ({type(exc).__name__})") from exc
+
+
 def parse_landing(html, slug, final_url):
     """Premium landing uses scoped project components instead of logs.slug.
 
@@ -262,6 +297,10 @@ class HTTPClient:
         self.delay, self.retries, self.last_request = delay, retries, 0
         self.final_urls = {}
         self.rules = None
+        self.document_rules = None
+        self.document_robots_checked = False
+        self.document_downloaded_bytes = 0
+        self.document_unavailable = False
         self.robots_text = self.get(self.base_url + "/robots.txt", check_robots=False)
         self.rules = RobotsRules(self.robots_text)
         self.delay = max(self.delay, self.rules.delay)
@@ -310,6 +349,78 @@ class HTTPClient:
                 if response is not None:
                     response.close()
         raise SourceError("Исчерпаны повторы HTTP")
+
+    def get_booklet_pdf(self, url, expected_size=None):
+        """Fetch only an explicitly linked project booklet from the observed CMS host.
+
+        robots.txt must be readable and allow the exact asset. A failed CMS host
+        disables further document requests for this run without failing HTML data.
+        """
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or parsed.hostname != BOOKLET_HOST or parsed.query or
+                not re.fullmatch(r"/assets/[0-9a-fA-F-]{36}\.pdf", parsed.path)):
+            raise SourceError("Документ не является безопасной ссылкой на PDF-буклет GloraX")
+        if expected_size and (expected_size < 1 or expected_size > MAX_BOOKLET_BYTES):
+            raise SourceError(f"Размер буклета превышает ограничение {MAX_BOOKLET_BYTES // (1024 * 1024)} MiB")
+        if self.document_downloaded_bytes + (expected_size or 0) > MAX_BOOKLET_BYTES_PER_REFRESH:
+            raise SourceError("Достигнут лимит загрузки буклетов на один сбор; оставшиеся PDF перенесены на следующий запуск")
+        if self.document_unavailable:
+            raise SourceError("Хранилище PDF ранее стало недоступно в этом запуске")
+        if not self.document_robots_checked:
+            self.document_robots_checked = True
+            try:
+                response = self.session.get(f"https://{BOOKLET_HOST}/robots.txt", timeout=(4, 8),
+                                            allow_redirects=False, stream=True)
+                try:
+                    if response.status_code != 200:
+                        self.document_rules = RobotsRules("User-agent: *\nDisallow: /")
+                        raise SourceError(f"robots.txt хранилища PDF недоступен (HTTP {response.status_code})")
+                    chunks, length = [], 0
+                    for chunk in response.iter_content(8192):
+                        length += len(chunk)
+                        if length > 256 * 1024:
+                            self.document_rules = RobotsRules("User-agent: *\nDisallow: /")
+                            raise SourceError("robots.txt хранилища PDF превышает ограничение")
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
+                    self.document_rules = RobotsRules(body.decode("utf-8", errors="replace"))
+                finally:
+                    response.close()
+            except requests.RequestException as exc:
+                self.document_rules = RobotsRules("User-agent: *\nDisallow: /")
+                self.document_unavailable = True
+                raise SourceError(f"Не удалось проверить robots.txt хранилища PDF ({type(exc).__name__})") from exc
+        if not self.document_rules or not self.document_rules.allowed(url):
+            raise SourceError("robots.txt запрещает сбор этого PDF")
+        response = None
+        try:
+            response = self.session.get(url, timeout=(6, 20), allow_redirects=False, stream=True)
+            if response.status_code in (401, 403):
+                raise SourceError(f"Хранилище PDF ограничило доступ HTTP {response.status_code}; обход не выполняется")
+            if response.status_code == 429 or response.status_code >= 500:
+                raise SourceError(f"Хранилище PDF временно недоступно HTTP {response.status_code}")
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > MAX_BOOKLET_BYTES:
+                raise SourceError("PDF превышает ограничение размера")
+            chunks, size = [], 0
+            for chunk in response.iter_content(65536):
+                size += len(chunk)
+                if size > MAX_BOOKLET_BYTES:
+                    raise SourceError("PDF превысил ограничение размера во время загрузки")
+                if self.document_downloaded_bytes + size > MAX_BOOKLET_BYTES_PER_REFRESH:
+                    raise SourceError("Достигнут лимит загрузки буклетов на один сбор")
+                chunks.append(chunk)
+            content = b"".join(chunks)
+            if expected_size and size != expected_size:
+                LOG.warning("Размер PDF изменился: url=%s expected=%s received=%s", url, expected_size, size)
+            self.document_downloaded_bytes += size
+            return content
+        except requests.RequestException as exc:
+            raise SourceError(f"Ошибка загрузки PDF ({type(exc).__name__})") from exc
+        finally:
+            if response is not None:
+                response.close()
 
 
 def collect_catalog(client):
@@ -393,6 +504,19 @@ def normalize_project(row, detail=None, fetched_at=None):
         facts.append(make_fact("layouts", "advertised_min_area", decimal_text(flat_type.get("square")), CATALOG_URL,
                                {"projectSlug": slug, "flatType": flat_type}, value_type="decimal", unit="м²", scope=scope, valid_days=7,
                                conditions={"basis": "advertised_minimum", "observed_on": fetched_at[:10]}))
+        # The catalogue's per-room `price` is a published starting price, not
+        # a maximum or a complete sample. Keep it separate by room type.
+        room_price = decimal_text(flat_type.get("price")) if not row.get("hidePriceFlg") else None
+        room_conditions = {"currency": "RUB", "price_basis": "total", "property_type": flat_type.get("typeSlug"),
+                           "payment_terms": "not_specified", "promotion": "цена «от» в каталоге; применимость акций отдельно не подтверждена",
+                           "basis": "advertised_minimum", "sample_complete": False,
+                           "observed_on": fetched_at[:10], "collection_started_at": fetched_at,
+                           "collection_finished_at": fetched_at}
+        facts.append(make_fact("prices", "advertised_min_price", room_price, CATALOG_URL,
+                               {"projectSlug": slug, "flatType": flat_type, "catalogue_tags": tags},
+                               value_type="decimal", unit="RUB", scope=scope, verified=room_price is not None,
+                               conditions=room_conditions, valid_days=7,
+                               missing_reason="Для этого типа квартир каталог не показывает цену" if room_price is None else None))
     metros = row.get("metro") or []
     for i, transport in enumerate(metros):
         scope = {"level": "project", "transport_index": i}
@@ -409,7 +533,9 @@ def normalize_project(row, detail=None, fetched_at=None):
         params = (detail.get("aboutProject") or {}).get("projectParams") or []
         mappings = {"корпуса": ("buildings", "building_count"), "этажность": ("buildings", "floor_range"),
                     "класс": ("overview", "project_class"), "класс проекта": ("overview", "project_class"),
-                    "высота потолков": ("layouts", "ceiling_height"), "квартиры": ("layouts", "apartment_count")}
+                    "высота потолков": ("layouts", "ceiling_height"), "квартиры": ("layouts", "apartment_count"),
+                    "количество секций": ("buildings", "section_count"),
+                    "площадь благоустройства": ("amenities", "landscaping_area")}
         for param in params if isinstance(params, list) else []:
             label = clean_text(param.get("description"))
             title = clean_text(param.get("title"))
@@ -420,6 +546,43 @@ def normalize_project(row, detail=None, fetched_at=None):
             elif title:
                 facts.append(make_fact("overview", "parameter_" + hashlib.sha256((label or title).encode()).hexdigest()[:12], title,
                                        url, param, verified=False, exclusive=False, conditions={"label": label}))
+        # The detailed project page publishes concise, project-scoped scalar
+        # metrics. These are safe to quiz as their literal stated values.
+        aliases = {
+            "площадь участка": ("overview", "land_area", "га", "decimal"),
+            "количество очередей строительства": ("buildings", "construction_phase_count", "очередей", "integer"),
+            "очереди строительства": ("buildings", "construction_phase_count", "очередей", "integer"),
+            "количество секций": ("buildings", "section_count", "секций", "integer"),
+            "мест в школе": ("infrastructure", "school_places", "мест", "integer"),
+            "мест в 2 детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
+            "мест в детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
+        }
+        emitted = {f["key"] for f in facts if f["key"] in {"section_count", "landscaping_area"}}
+        for metric in (detail.get("aboutProject") or {}).get("statistics") or []:
+            label = clean_text(metric.get("description"))
+            title = clean_text(metric.get("title"))
+            mapping = aliases.get((label or "").casefold())
+            if not mapping or not title:
+                continue
+            category, key, unit, value_type = mapping
+            if key in emitted or key == "section_count" and any(f["key"] == key for f in facts):
+                continue
+            emitted.add(key)
+            raw = re.search(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?", title)
+            value = raw.group(0).replace(" ", "").replace("\u00a0", "").replace(",", ".") if raw else None
+            facts.append(make_fact(category, key, value, url, metric, value_type=value_type, unit=unit,
+                                   verified=bool(value), conditions={"basis": "project_page_metric"},
+                                   missing_reason="Число не удалось однозначно извлечь" if not value else None))
+        # A visible range is two independent facts; never infer area bounds
+        # from a single apartment or from an image.
+        area_range = re.search(r"(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*м[²2]", (detail.get("aboutProject") or {}).get("descriptionFull", ""), re.I)
+        if area_range:
+            for key, value in (("min_area", area_range.group(1)), ("max_area", area_range.group(2))):
+                if not any(f["key"] == key and f["scope"].get("property_type") == "flat" for f in facts):
+                    facts.append(make_fact("layouts", key, value.replace(",", "."), url,
+                                           {"aboutProject": detail["aboutProject"], "matched_text": area_range.group(0)},
+                                           value_type="decimal", unit="м²",
+                                           scope={"level": "property_type", "property_type": "flat"}, conditions={"basis": "published_range"}))
         for building in (detail.get("hero") or {}).get("finishPercentage") or []:
             if building.get("label"):
                 facts.append(make_fact("buildings", "completion_date", building.get("finishDate"), url, building, value_type="date",
@@ -587,6 +750,36 @@ def scrape(progress=None, client=None):
             errors.append({"stage": "detail", "project": row["projectSlug"], "url": url, "message": str(exc)})
             LOG.warning("Не удалось собрать %s: %s", row["projectSlug"], exc)
         project = normalize_project(row, detail, fetched)
+        if detail:
+            document_rows = detail.get("documents") or ((detail.get("_landing_logs") or {}).get("documents") or {}).get("documents") or []
+            booklet = next((document for document in document_rows if isinstance(document, dict) and
+                            "буклет" in (clean_text(document.get("title")) or "").casefold()), None)
+            if booklet:
+                link = booklet.get("link") or {}
+                booklet_url = link.get("url")
+                doc_report = {"title": clean_text(booklet.get("title")), "url": booklet_url,
+                              "declared_size": link.get("size"), "status": "pending_review"}
+                try:
+                    pdf = client.get_booklet_pdf(booklet_url, link.get("size"))
+                    pages = extract_pdf_text(pdf)
+                    extracted = {"pages": pages, "page_count": len(pages),
+                                 "text_status": "extracted" if pages else "no_text_layer",
+                                 "review_required": True,
+                                 "note": "Текст PDF — исходный материал, а не подтверждённый факт; смысл и область применения нужно проверить администратору."}
+                    sources.append({"url": booklet_url, "content": json.dumps(extracted, ensure_ascii=False),
+                                    "content_type": "application/pdf-extracted-text; charset=utf-8", "fetched_at": fetched})
+                    doc_report.update({"status": extracted["text_status"], "pages_with_text": len(pages),
+                                       "downloaded_bytes": len(pdf), "sha256": hashlib.sha256(pdf).hexdigest(),
+                                       "review_required": True})
+                except (SourceError, requests.RequestException) as exc:
+                    doc_report.update({"status": "unavailable_or_skipped", "reason": str(exc)})
+                    errors.append({"stage": "document", "project": row["projectSlug"], "url": booklet_url,
+                                   "message": str(exc)})
+                    LOG.warning("Буклет %s пропущен: %s", row["projectSlug"], exc)
+                project["coverage"]["booklet"] = doc_report
+            else:
+                project["coverage"]["booklet"] = {"status": "not_published",
+                                                    "reason": "В источнике не найден документ с названием «Буклет проекта»"}
         if detail:
             project["canonical_url"]=final_url
             for fact in project["facts"]:

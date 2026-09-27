@@ -218,7 +218,8 @@ def project_detail(project_id):
             db.session.rollback()
             flash(str(exc), 'error')
     facts = db.session.query(Fact, FactRevision).outerjoin(FactRevision, Fact.current_revision_id == FactRevision.id).filter(Fact.project_id == project.id).order_by(Fact.category, Fact.key).all()
-    return render_template('admin_project_detail.html', project=project, facts=facts)
+    sources = Source.query.filter_by(project_id=project.id).order_by(Source.fetched_at.desc()).limit(40).all()
+    return render_template('admin_project_detail.html', project=project, facts=facts, sources=sources)
 
 
 @bp.route('/projects/<project_id>/facts/new', methods=['GET', 'POST'])
