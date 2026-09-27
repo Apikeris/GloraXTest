@@ -24,20 +24,33 @@ def session_hash():
     return hashlib.sha256(session['participant_session'].encode()).hexdigest()
 
 
-def select_questions(project,shuffle=True):
-    from .questions import eligible_questions
-    questions=eligible_questions(project) if project.enabled else []
+def _apply_question_settings(project, questions, shuffle=True):
+    questions = list(questions)
     if shuffle: rng.shuffle(questions)
-    distribution=project.topic_distribution or {}
+    distribution = project.topic_distribution or {}
     if distribution:
-        buckets={key:[] for key in distribution}
-        for q in questions:
-            r=db.session.get(QuestionRevision,q.current_revision_id)
-            if r.category in buckets: buckets[r.category].append(q)
-        questions=[q for key,items in buckets.items() for q in items[:max(0,int(distribution[key]))]]
+        buckets = {key: [] for key in distribution}
+        for question in questions:
+            revision = db.session.get(QuestionRevision, question.current_revision_id)
+            if revision and revision.category in buckets:
+                buckets[revision.category].append(question)
+        questions = [question for key, items in buckets.items() for question in items[:max(0, int(distribution[key]))]]
         if shuffle: rng.shuffle(questions)
-    limit=project.question_limit or get_setting('question_limit',None)
+    limit = project.question_limit or get_setting('question_limit', None)
     return questions[:int(limit)] if limit else questions
+
+
+def select_questions(project, shuffle=True):
+    from .questions import eligible_questions
+    questions = eligible_questions(project) if project.enabled else []
+    return _apply_question_settings(project, questions, shuffle)
+
+
+def available_question_counts(projects):
+    """Calculate all public catalogue counts without one validation query set per card."""
+    from .questions import eligible_questions_for_projects
+    eligible = eligible_questions_for_projects(projects)
+    return {project.id: len(_apply_question_settings(project, eligible.get(project.id, []), shuffle=False)) for project in projects}
 
 
 def owned_attempt(attempt_id):
@@ -82,10 +95,12 @@ def result_data(attempt):
 
 @bp.get('/')
 def index():
+    projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
+    counts = available_question_counts(projects)
     cards=[]
-    for project in db.session.execute(db.select(Project).order_by(Project.name)).scalars():
-        questions=select_questions(project,False)
-        cards.append({'project':project,'count':len(questions),'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not questions else None})
+    for project in projects:
+        count = counts[project.id]
+        cards.append({'project':project,'count':count,'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not count else None})
     return render_template('index.html',cards=cards,dataset=latest_dataset())
 
 

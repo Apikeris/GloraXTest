@@ -471,38 +471,65 @@ def generate_questions(dataset_id):
     return report
 
 
-def eligible_questions(project):
-    project_id = project.id if hasattr(project, "id") else project
-    project_obj = db.session.get(Project, project_id)
-    if not project_obj or not project_obj.enabled:
-        return []
-    result = []
-    questions=Question.query.filter_by(project_id=project_id,status="published").order_by(Question.id).all()
-    revision_ids={question.current_revision_id for question in questions if question.current_revision_id}
-    question_revisions=list(db.session.scalars(db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids)))) if revision_ids else []
-    fact_revision_ids=set()
-    dataset_ids=set()
+def _preload_question_validation(questions, project_ids=()):
+    """Load all relations needed by ``validate_revision`` in bounded queries.
+
+    This is used for the public catalogue as well as an individual test start.
+    Validation remains the single eligibility decision; this helper only avoids
+    turning one catalogue page into a network round-trip per project.
+    """
+    revision_ids = {question.current_revision_id for question in questions if question.current_revision_id}
+    question_revisions = list(db.session.scalars(
+        db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids))
+    )) if revision_ids else []
+    fact_revision_ids = set()
+    dataset_ids = set()
     for revision in question_revisions:
-        fact_revision_ids.add(revision.target_fact_revision_id)
+        if revision.target_fact_revision_id:
+            fact_revision_ids.add(revision.target_fact_revision_id)
         fact_revision_ids.update(option.get('fact_revision_id') for option in revision.options or [] if option.get('fact_revision_id'))
-        dataset_ids.add(revision.dataset_id)
-    fact_revisions=list(db.session.scalars(db.select(FactRevision).where(FactRevision.id.in_(fact_revision_ids)))) if fact_revision_ids else []
-    fact_ids={revision.fact_id for revision in fact_revisions}
-    facts=list(db.session.scalars(db.select(Fact).where(Fact.id.in_(fact_ids)))) if fact_ids else []
-    project_ids={fact.project_id for fact in facts}|{project_id}
-    projects=list(db.session.scalars(db.select(Project).where(Project.id.in_(project_ids)))) if project_ids else []
-    # Validation below can now use the session identity map rather than making
-    # several network round-trips for every option of every question.
-    cache=db.session.info.setdefault('glorax_dataset_members_cache',{})
-    missing_datasets=dataset_ids-cache.keys()
+        if revision.dataset_id:
+            dataset_ids.add(revision.dataset_id)
+    fact_revisions = list(db.session.scalars(
+        db.select(FactRevision).where(FactRevision.id.in_(fact_revision_ids))
+    )) if fact_revision_ids else []
+    fact_ids = {revision.fact_id for revision in fact_revisions}
+    facts = list(db.session.scalars(db.select(Fact).where(Fact.id.in_(fact_ids)))) if fact_ids else []
+    related_project_ids = set(project_ids) | {fact.project_id for fact in facts}
+    if related_project_ids:
+        list(db.session.scalars(db.select(Project).where(Project.id.in_(related_project_ids))))
+    cache = db.session.info.setdefault('glorax_dataset_members_cache', {})
+    missing_datasets = dataset_ids - cache.keys()
     if missing_datasets:
-        grouped={dataset_id:set() for dataset_id in missing_datasets}
+        grouped = {dataset_id: set() for dataset_id in missing_datasets}
         for row in db.session.scalars(db.select(DatasetFact).where(DatasetFact.dataset_id.in_(missing_datasets))):
             grouped[row.dataset_id].add(row.revision_id)
         cache.update(grouped)
-    revisions_by_id={revision.id:revision for revision in question_revisions}
+    return {revision.id: revision for revision in question_revisions}
+
+
+def eligible_questions_for_projects(projects):
+    """Return eligible published questions for several projects in one batch."""
+    by_id = {project.id: project for project in projects if project and project.enabled}
+    result = {project.id: [] for project in projects if project}
+    if not by_id:
+        return result
+    questions = list(db.session.scalars(
+        db.select(Question).where(
+            Question.project_id.in_(by_id), Question.status == 'published'
+        ).order_by(Question.project_id, Question.id)
+    ))
+    revisions_by_id = _preload_question_validation(questions, by_id)
     for question in questions:
         revision = revisions_by_id.get(question.current_revision_id)
-        if revision and (question.origin == "generated" or revision.semantic_reviewed) and not validate_revision(revision, semantic_review=True):
-            result.append(question)
+        if revision and (question.origin == 'generated' or revision.semantic_reviewed) and not validate_revision(revision, semantic_review=True):
+            result[question.project_id].append(question)
     return result
+
+
+def eligible_questions(project):
+    project_id = project.id if hasattr(project, 'id') else project
+    project_obj = project if hasattr(project, 'id') else db.session.get(Project, project_id)
+    if not project_obj or not project_obj.enabled:
+        return []
+    return eligible_questions_for_projects([project_obj]).get(project_id, [])

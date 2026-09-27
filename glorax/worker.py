@@ -10,7 +10,7 @@ from .jobs import recover_jobs,claim_job,run_job,worker_heartbeat,safe_job_error
 from .attempts import sweep_expired
 
 
-def maintenance(stop):
+def maintenance(stop, interval_seconds=5):
     app=create_app()
     with app.app_context():
         while not stop.is_set():
@@ -18,24 +18,27 @@ def maintenance(stop):
             except Exception as exc:
                 db.session.rollback();app.logger.error('Timeout maintenance failed: %s',type(exc).__name__)
             finally: db.session.remove()
-            stop.wait(1)
+            stop.wait(interval_seconds)
 
 
-def queue(stop,once=False):
+def queue(stop,once=False, idle_poll_seconds=5, recovery_interval_seconds=30):
     app=create_app()
     with app.app_context():
         if db.engine.dialect.name!='postgresql': raise RuntimeError('Worker требует PostgreSQL.')
-        heartbeat_at=0
+        heartbeat_at = recovery_at = 0
         while not stop.is_set():
             try:
-                if time.monotonic()-heartbeat_at>=15:
-                    worker_heartbeat();heartbeat_at=time.monotonic()
-                recover_jobs();job=claim_job()
+                now = time.monotonic()
+                if now - heartbeat_at >= 15:
+                    worker_heartbeat(); heartbeat_at = now
+                if now - recovery_at >= recovery_interval_seconds:
+                    recover_jobs(); recovery_at = now
+                job = claim_job()
                 if job:
                     succeeded=run_job(*job)
                     if once and not succeeded: raise RuntimeError("Задание завершилось ошибкой; проверьте сохранённый отчёт")
                 if once: sweep_expired();break
-                if not job: stop.wait(1)
+                if not job: stop.wait(idle_poll_seconds)
             except Exception as exc:
                 db.session.rollback();app.logger.error('Worker iteration failed: %s',safe_job_error(exc))
                 if once: raise

@@ -54,7 +54,7 @@ def create_app(test_config=None):
         response.headers['X-Frame-Options']='DENY'
         response.headers['Referrer-Policy']='same-origin'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
-        response.headers['Cache-Control']='no-store'
+        response.headers['Cache-Control'] = 'public, max-age=3600' if request.path.startswith(app.static_url_path + '/') else 'no-store'
         if app.config.get('PRODUCTION'):
             response.headers['Strict-Transport-Security']='max-age=31536000'
         return response
