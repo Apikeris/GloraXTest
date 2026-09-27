@@ -163,3 +163,6 @@ python -m glorax.parser --output /secure/output/live-source.json
 ## Модули
 
 `glorax/config.py` — окружение/TLS; `models.py` — схема; `parser.py` — публичные источники; `facts.py` — снимки и правки; `questions.py` — формальные шаблоны; `importing.py` — JSON Schema/импорт; `attempts.py` — серверная попытка; `auth.py`/`admin.py` — доступ и админка; `jobs.py`/`worker.py` — очередь и обслуживание; `legacy.py` — перенос; `migrations/` — Alembic. Интерфейс — Jinja и локальные CSS/JS, без обязательного CDN. Все административные формы и JSON API защищены CSRF, браузерные сессии — HttpOnly/SameSite, production — Secure, вход ограничен по IP в общей БД.
+# Перенос на Koyeb (бесплатный web-инстанс)
+
+В репозитории есть `Dockerfile`; в Koyeb выберите **Create Web Service → GitHub → Apikeris/GloraXTest**, регион `Frankfurt`, тип инстанса `Free`, порт `8000`, health check `/healthz`. Переменные `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `PGSSLROOTCERT` и содержимое CA-сертификата задаются в Secrets. Бесплатный Koyeb не поддерживает отдельный Worker, поэтому фоновые задания нужно запускать внешним расписанием (например, GitHub Actions) или вручную; не запускайте worker внутри web-контейнера.
