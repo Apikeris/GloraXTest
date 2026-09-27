@@ -33,7 +33,7 @@ def stop_children(children, grace_seconds=15):
 
 
 def serve(commands, env, prepare_command, poll_seconds=0.5):
-    children = []
+    running = {}
     stopping = False
 
     def stop(*_):
@@ -44,7 +44,7 @@ def serve(commands, env, prepare_command, poll_seconds=0.5):
     try:
         print('Render: applying migrations before web and worker start', flush=True)
         migration = subprocess.Popen(prepare_command, cwd=ROOT, env=env, start_new_session=True)
-        children.append(migration)
+        running['migration'] = migration
         while migration.poll() is None and not stopping:
             time.sleep(poll_seconds)
         if stopping:
@@ -52,22 +52,38 @@ def serve(commands, env, prepare_command, poll_seconds=0.5):
         if migration.returncode != 0:
             print('Render: database preparation failed; web and worker were not started', flush=True)
             return 1
-        children.clear()
+        migration.wait()
+        running.clear()
         for name, command in commands:
             if stopping:
                 return 0
             child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
-            children.append(child)
+            running[name] = child
             print(f'Render: {name} started', flush=True)
+        worker_restart_delay = 1
         while not stopping:
-            for (name, _), child in zip(commands, children):
+            for name, command in commands:
+                child = running[name]
                 if child.poll() is not None:
-                    print(f'Render: {name} exited ({child.returncode}); stopping service for restart', flush=True)
-                    return 1
+                    code = child.returncode
+                    child.wait()  # Reap the completed process before replacing it.
+                    if name == 'web':
+                        print(f'Render: web exited ({code}); stopping service for restart', flush=True)
+                        return 1
+                    print(f'Render: {name} exited ({code}); web remains available; restarting worker in {worker_restart_delay}s', flush=True)
+                    del running[name]
+                    deadline = time.monotonic() + worker_restart_delay
+                    while not stopping and time.monotonic() < deadline:
+                        time.sleep(min(poll_seconds, max(0, deadline-time.monotonic())))
+                    if stopping:
+                        return 0
+                    running[name] = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
+                    print(f'Render: {name} restarted', flush=True)
+                    worker_restart_delay = min(worker_restart_delay * 2, 30)
             time.sleep(poll_seconds)
         return 0
     finally:
-        stop_children(children)
+        stop_children(list(running.values()))
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 

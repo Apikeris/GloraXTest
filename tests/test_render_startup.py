@@ -68,15 +68,36 @@ def test_migration_failure_prevents_web_and_worker(monkeypatch):
     assert len(children)==1 and children[0].returncode==2
 
 
-def test_migration_before_children_and_worker_failure_stops_web(monkeypatch,tmp_path):
+def test_migration_before_children_and_worker_failure_restarts_only_worker(monkeypatch,tmp_path):
     marker=tmp_path/'migrated'
+    worker_starts=tmp_path/'worker-starts'
     children=capture_children(monkeypatch)
     prepare=command(f'from pathlib import Path; Path({str(marker)!r}).write_text("done")')
-    web=command(f'import time; from pathlib import Path; assert Path({str(marker)!r}).exists(); time.sleep(60)')
-    worker=command('import time; time.sleep(0.1); raise SystemExit(3)')
-    assert start_render.serve([('web',web),('worker',worker)],os.environ.copy(),prepare,poll_seconds=0.01)==1
-    assert len(children)==3 and all(p.poll() is not None for p in children)
-    assert children[1].returncode!=0 and children[2].returncode==3
+    web=command(f'''import os,time
+from pathlib import Path
+assert Path({str(marker)!r}).exists()
+deadline=time.monotonic()+10
+while time.monotonic()<deadline:
+    path=Path({str(worker_starts)!r})
+    if path.exists() and path.read_text() == "2":
+        os.kill(os.getppid(), __import__('signal').SIGTERM)
+        break
+    time.sleep(0.01)
+else:
+    raise SystemExit("worker was not restarted")
+time.sleep(60)''')
+    worker=command(f'''import sys,time
+from pathlib import Path
+path=Path({str(worker_starts)!r})
+starts=int(path.read_text()) if path.exists() else 0
+path.write_text(str(starts+1))
+if starts == 0: raise SystemExit(3)
+time.sleep(60)''')
+    assert start_render.serve([('web',web),('worker',worker)],os.environ.copy(),prepare,poll_seconds=0.01)==0
+    assert len(children)==4
+    assert children[1].returncode is not None
+    assert children[2].returncode==3
+    assert children[3].returncode is not None
 
 
 def test_render_stop_signal_stops_both_services(monkeypatch):
