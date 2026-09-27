@@ -21,7 +21,7 @@ def worker_diagnostics(job=None):
     seen=datetime.fromisoformat(row.value) if row else None
     now=utcnow()
     online=bool(seen and (now-aware(seen)).total_seconds()<60)
-    message='Worker подключён к очереди.' if online else 'Нет свежего сигнала worker. Проверьте Start Command Gunicorn с scripts/gunicorn_conf.py. Во время сна сервиса задания не выполняются.'
+    message='Worker подключён к очереди.' if online else 'Нет свежего сигнала worker. На бесплатном Render задания должны запускаться отдельным расписанием. Во время сна сервиса задания не выполняются.'
     if job is None:
         job=db.session.scalar(db.select(Job).where(Job.active_key=='refresh'))
     if job and job.state=='running' and job.heartbeat_at and (now-aware(job.heartbeat_at)).total_seconds()<current_app.config.get('WORKER_LEASE_SECONDS',600):

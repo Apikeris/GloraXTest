@@ -6,10 +6,9 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # Gunicorn opens the HTTP socket first; its when_ready hook then supervises
-    # the compact queue worker in the background, so DB/job stalls cannot delay
-    # Render's port detection.
-    startCommand: exec gunicorn app:app --config scripts/gunicorn_conf.py --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
+    # Keep scraping out of this free web instance: the worker can starve HTTP
+    # health checks while a long refresh is running.
+    startCommand: exec gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'
     envVars:
