@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import random
 import secrets
+import time
 from datetime import timedelta
 from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, session, url_for, flash
 from sqlalchemy.exc import SQLAlchemyError
@@ -100,14 +101,22 @@ def index():
     # PostgreSQL (the normal GET below performs several catalogue queries).
     if request.method == 'HEAD':
         return Response(status=200)
+    stage_started = time.monotonic()
     try:
+        current_app.logger.info('Catalogue request started')
         projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
+        current_app.logger.info('Catalogue stage=projects count=%d seconds=%.3f', len(projects), time.monotonic() - stage_started)
+        stage_started = time.monotonic()
         counts = available_question_counts(projects)
+        current_app.logger.info('Catalogue stage=question_counts count=%d seconds=%.3f', sum(counts.values()), time.monotonic() - stage_started)
+        stage_started = time.monotonic()
         cards=[]
         for project in projects:
             count = counts[project.id]
             cards.append({'project':project,'count':count,'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not count else None})
-        return render_template('index.html',cards=cards,dataset=latest_dataset())
+        dataset = latest_dataset()
+        current_app.logger.info('Catalogue stage=dataset seconds=%.3f', time.monotonic() - stage_started)
+        return render_template('index.html',cards=cards,dataset=dataset)
     except SQLAlchemyError as exc:
         db.session.rollback()
         current_app.logger.error('Catalogue database query failed: %s; pool=%s', type(exc).__name__, db.engine.pool.status())
