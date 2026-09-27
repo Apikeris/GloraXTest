@@ -192,9 +192,12 @@ def analytics():
 
 @bp.get('/projects')
 def projects():
-    from .questions import eligible_questions
+    from .attempts import available_question_counts
     values = project_list()
-    counts = {p.id: len(eligible_questions(p)) for p in values}
+    # Publication already performed deep validation. Use the grouped SQL
+    # counter shared with the employee catalogue instead of revalidating each
+    # question serially for every project on every admin page load.
+    counts = available_question_counts(values)
     return render_template('admin_projects.html', projects=values, counts=counts)
 
 
