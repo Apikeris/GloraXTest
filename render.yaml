@@ -6,10 +6,10 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # Keep the web process as the only foreground process on Render Free.
-    # Migrations are run explicitly from the deploy dashboard/one-off job;
-    # blocking startup on a database lock makes Render report a white/502 page.
-    startCommand: exec gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
+    # Gunicorn opens the HTTP socket first; its when_ready hook then supervises
+    # the compact queue worker in the background, so DB/job stalls cannot delay
+    # Render's port detection.
+    startCommand: exec gunicorn app:app --config scripts/gunicorn_conf.py --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'
     envVars:

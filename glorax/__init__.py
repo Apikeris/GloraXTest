@@ -41,12 +41,23 @@ def create_app(test_config=None):
 
     @app.get('/healthz')
     def health():
+        # Liveness checks must prove the HTTP worker can answer. Do not make
+        # Render's router depend on Aiven: a transient database outage would
+        # otherwise make an otherwise-live web process appear dead and can
+        # leave users looking at a blank/502 page.
+        return jsonify(status='ok')
+
+    @app.get('/readyz')
+    def readiness():
+        """Dependency check for operators; unlike /healthz this probes PostgreSQL."""
         try:
-            db.session.execute(text('SELECT 1'))
-            return jsonify(status='ok')
-        except Exception:
+            with db.engine.connect() as connection:
+                connection.execute(text('SELECT 1'))
+            return jsonify(status='ok', database='ok')
+        except Exception as exc:
+            app.logger.warning('Database readiness check failed: %s', type(exc).__name__)
             db.session.rollback()
-            return jsonify(status='unavailable'),503
+            return jsonify(status='unavailable', database='unavailable'),503
 
     @app.after_request
     def headers(response):

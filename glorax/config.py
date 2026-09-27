@@ -16,7 +16,7 @@ def configuration():
         url = url.replace('postgresql://','postgresql+psycopg://',1)
     options = {'pool_pre_ping': True, 'hide_parameters': True}
     if url.startswith('postgresql'):
-        options.update(pool_size=int(os.getenv('DB_POOL_SIZE','3')),max_overflow=int(os.getenv('DB_MAX_OVERFLOW','1')),pool_recycle=300,pool_timeout=15,connect_args={'options':'-c timezone=UTC'})
+        options.update(pool_size=int(os.getenv('DB_POOL_SIZE','3')),max_overflow=int(os.getenv('DB_MAX_OVERFLOW','1')),pool_recycle=300,pool_timeout=8,connect_args={'connect_timeout':5,'options':'-c timezone=UTC'})
     if production:
         parsed = make_url(url)
         ca = os.getenv('PGSSLROOTCERT') or parsed.query.get('sslrootcert')
@@ -26,7 +26,7 @@ def configuration():
             raise RuntimeError('Укажите существующий CA-файл PGSSLROOTCERT.')
         if parsed.query.get('sslmode') not in (None,'verify-full'):
             raise RuntimeError('В production разрешён только sslmode=verify-full.')
-        options['connect_args'] = {'sslmode':'verify-full','sslrootcert':str(ca),'connect_timeout':10,'options':'-c timezone=UTC'}
+        options['connect_args'] = {'sslmode':'verify-full','sslrootcert':str(ca),'connect_timeout':5,'options':'-c timezone=UTC'}
     return dict(SECRET_KEY=secret,SQLALCHEMY_DATABASE_URI=url,SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SQLALCHEMY_ENGINE_OPTIONS=options,SESSION_COOKIE_SECURE=production,SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',PERMANENT_SESSION_LIFETIME=timedelta(hours=8),

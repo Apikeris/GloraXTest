@@ -4,6 +4,7 @@ import random
 import secrets
 from datetime import timedelta
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, session, url_for, flash
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.dialects.postgresql import insert
 from .extensions import db
 from .models import Project, Participant, Attempt, AttemptItem, QuestionRevision, uid, utcnow, aware
@@ -95,13 +96,18 @@ def result_data(attempt):
 
 @bp.get('/')
 def index():
-    projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
-    counts = available_question_counts(projects)
-    cards=[]
-    for project in projects:
-        count = counts[project.id]
-        cards.append({'project':project,'count':count,'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not count else None})
-    return render_template('index.html',cards=cards,dataset=latest_dataset())
+    try:
+        projects = list(db.session.execute(db.select(Project).order_by(Project.name)).scalars())
+        counts = available_question_counts(projects)
+        cards=[]
+        for project in projects:
+            count = counts[project.id]
+            cards.append({'project':project,'count':count,'reason': 'Проект отключён администратором.' if not project.enabled else 'Нет актуальных опубликованных вопросов: данные ожидают проверки или недостаточно однозначных вариантов.' if not count else None})
+        return render_template('index.html',cards=cards,dataset=latest_dataset())
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        current_app.logger.error('Catalogue database query failed: %s', type(exc).__name__)
+        return render_template('error.html', message='Не удалось подключиться к базе проектов. Попробуйте обновить страницу через минуту.'), 503
 
 
 @bp.post('/start_test')
