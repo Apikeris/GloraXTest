@@ -5,4 +5,4 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 8000
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "2", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["sh", "-c", "python scripts/migrate.py --enqueue-initial-refresh && exec gunicorn app:app --config scripts/gunicorn_conf.py --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 2 --timeout 60 --graceful-timeout 10 --access-logfile - --error-logfile -"]
