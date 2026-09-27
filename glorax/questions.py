@@ -477,8 +477,32 @@ def eligible_questions(project):
     if not project_obj or not project_obj.enabled:
         return []
     result = []
-    for question in Question.query.filter_by(project_id=project_id, status="published").order_by(Question.id).all():
-        revision = db.session.get(QuestionRevision, question.current_revision_id)
+    questions=Question.query.filter_by(project_id=project_id,status="published").order_by(Question.id).all()
+    revision_ids={question.current_revision_id for question in questions if question.current_revision_id}
+    question_revisions=list(db.session.scalars(db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids)))) if revision_ids else []
+    fact_revision_ids=set()
+    dataset_ids=set()
+    for revision in question_revisions:
+        fact_revision_ids.add(revision.target_fact_revision_id)
+        fact_revision_ids.update(option.get('fact_revision_id') for option in revision.options or [] if option.get('fact_revision_id'))
+        dataset_ids.add(revision.dataset_id)
+    fact_revisions=list(db.session.scalars(db.select(FactRevision).where(FactRevision.id.in_(fact_revision_ids)))) if fact_revision_ids else []
+    fact_ids={revision.fact_id for revision in fact_revisions}
+    facts=list(db.session.scalars(db.select(Fact).where(Fact.id.in_(fact_ids)))) if fact_ids else []
+    project_ids={fact.project_id for fact in facts}|{project_id}
+    projects=list(db.session.scalars(db.select(Project).where(Project.id.in_(project_ids)))) if project_ids else []
+    # Validation below can now use the session identity map rather than making
+    # several network round-trips for every option of every question.
+    cache=db.session.info.setdefault('glorax_dataset_members_cache',{})
+    missing_datasets=dataset_ids-cache.keys()
+    if missing_datasets:
+        grouped={dataset_id:set() for dataset_id in missing_datasets}
+        for row in db.session.scalars(db.select(DatasetFact).where(DatasetFact.dataset_id.in_(missing_datasets))):
+            grouped[row.dataset_id].add(row.revision_id)
+        cache.update(grouped)
+    revisions_by_id={revision.id:revision for revision in question_revisions}
+    for question in questions:
+        revision = revisions_by_id.get(question.current_revision_id)
         if revision and (question.origin == "generated" or revision.semantic_reviewed) and not validate_revision(revision, semantic_review=True):
             result.append(question)
     return result
