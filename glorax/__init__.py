@@ -55,7 +55,9 @@ def create_app(test_config=None):
                 connection.execute(text('SELECT 1'))
             return jsonify(status='ok', database='ok')
         except Exception as exc:
-            app.logger.warning('Database readiness check failed: %s', type(exc).__name__)
+            # Pool counters contain no credentials or SQL, and distinguish a
+            # saturated pool from connection/TLS/database failures in Render.
+            app.logger.warning('Database readiness check failed: %s; pool=%s', type(exc).__name__, db.engine.pool.status())
             db.session.rollback()
             return jsonify(status='unavailable', database='unavailable'),503
 

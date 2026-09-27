@@ -110,7 +110,7 @@ def index():
         return render_template('index.html',cards=cards,dataset=latest_dataset())
     except SQLAlchemyError as exc:
         db.session.rollback()
-        current_app.logger.error('Catalogue database query failed: %s', type(exc).__name__)
+        current_app.logger.error('Catalogue database query failed: %s; pool=%s', type(exc).__name__, db.engine.pool.status())
         return render_template('error.html', message='Не удалось подключиться к базе проектов. Попробуйте обновить страницу через минуту.'), 503
 
 
