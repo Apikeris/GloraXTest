@@ -1,11 +1,13 @@
 from datetime import timedelta
+from types import SimpleNamespace
 
 from glorax.extensions import db
-from glorax.models import Fact, FactRevision, Question, QuestionRevision, utcnow
+from glorax.models import Fact, FactRevision, Project, Question, QuestionRevision, utcnow
 from glorax.questions import (
     canonical_display,
     eligible_questions,
     generate_questions,
+    make_text,
     validate_fact_options,
     validate_revision,
 )
@@ -17,6 +19,49 @@ def test_equivalence():
     assert canonical_display("Дом сдан") == canonical_display("Завершён")
     assert canonical_display("СПБ") == canonical_display("Санкт-Петербург")
     assert canonical_display("  29 м²") == canonical_display("29 кв. м")
+
+
+def test_published_project_metric_template_and_upper_bound_display(app, seeded):
+    from glorax.question_values import format_value
+
+    with app.app_context():
+        project = db.session.get(Project, seeded["project_ids"][0])
+        fact = Fact(
+            project_id=project.id,
+            category="overview",
+            key="project_stat_example",
+            scope={},
+            scope_key="metric-test",
+        )
+        db.session.add(fact)
+        db.session.flush()
+        target = FactRevision(
+            fact_id=fact.id,
+            dataset_id=seeded["dataset_id"],
+            value="3",
+            value_type="text",
+            method="test",
+            verification_status="verified",
+            is_exclusive=True,
+            conditions={"metric_label": "тематических парка"},
+        )
+        db.session.add(target)
+        db.session.flush()
+        assert make_text(target, project) == (
+            f"Какое значение опубликовано для показателя «тематических парка» "
+            f"в проекте «{project.name}»?"
+        )
+        assert (
+            format_value(
+                SimpleNamespace(
+                    value_type="decimal",
+                    value="41.2",
+                    unit="м²",
+                    conditions={"basis": "published_upper_bound"},
+                )
+            )
+            == "до 41,2 м²"
+        )
 
 
 def test_generator_idempotent_provenance_no_unknown_features(app, seeded):

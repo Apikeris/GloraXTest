@@ -118,6 +118,7 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
             "projectParams": [
                 {"title": "5", "description": "Количество секций"},
                 {"title": "7–12 этажей", "description": "Этажность"},
+                {"title": "29-128 м²", "description": "Квартиры"},
             ],
             "statistics": [
                 {"title": "46,8 Га", "description": "площадь участка"},
@@ -157,6 +158,8 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
             "section_count",
             "patio_area",
             "parking_spaces",
+            "min_area",
+            "max_area",
         }
     }
     assert metrics["land_area"]["value"] == "46.8" and metrics["land_area"]["unit"] == "га"
@@ -167,6 +170,59 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
     assert metrics["patio_area"]["value"] == "41.2"
     assert metrics["patio_area"]["conditions"]["basis"] == "published_upper_bound"
     assert metrics["parking_spaces"]["value"] == "306"
+    assert metrics["min_area"]["value"] == "29"
+    assert metrics["max_area"]["value"] == "128"
+
+
+def test_rich_project_copy_yields_reviewable_details_and_explicit_layout_ranges():
+    row = {
+        "id": 41,
+        "projectSlug": "layout-sample",
+        "projectName": "Планировочный",
+        "cityName": "Москва",
+        "tags": [],
+        "flatType": [],
+    }
+    benefit = {
+        "id": 41,
+        "title": "Продуманные планировки",
+        "details": {
+            "content": [
+                {
+                    "html": (
+                        "<h5>Планировки квартир</h5><p>Высота потолков от 2,7 до 3,08 метров. "
+                        "Выбор от небольших студий площадью 20,14 кв. м до двухуровневых "
+                        "квартир площадью до 108 кв. м.</p>"
+                    )
+                }
+            ]
+        },
+    }
+    detail = {
+        "benefits": [benefit],
+        "aboutProject": {
+            "projectParams": [{"description": "Площадь недвижимости", "title": "150 тыс. кв. м"}],
+            "statistics": [
+                {"description": "тематических парка", "title": "3"},
+                {"description": "", "title": ""},
+            ],
+        },
+    }
+    facts = normalize_project(row, detail, "2026-09-27T01:00:00+00:00")["facts"]
+    by_key = {fact["key"]: fact for fact in facts}
+    assert by_key["benefit_41"]["verification_status"] == "needs_review"
+    assert "20,14 кв. м" in by_key["benefit_41"]["value"]
+    assert by_key["min_ceiling_height"]["value"] == "2.7"
+    assert by_key["max_ceiling_height"]["value"] == "3.08"
+    assert by_key["plan_area_min"]["value"] == "20.14"
+    assert by_key["plan_area_max"]["value"] == "108"
+    statistic = next(f for f in facts if f["key"].startswith("project_stat_"))
+    assert statistic["category"] == "amenities"
+    assert statistic["value"] == "3"
+    assert statistic["conditions"]["metric_label"] == "тематических парка"
+    parameter = next(f for f in facts if f["key"].startswith("parameter_"))
+    assert parameter["verification_status"] == "verified"
+    assert parameter["conditions"]["metric_label"] == "Площадь недвижимости"
 
 
 def test_complete_infrastructure_map_yields_only_exact_count_facts():

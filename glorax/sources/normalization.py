@@ -61,6 +61,32 @@ def make_fact(
     }
 
 
+def _rich_text(value):
+    """Read human-authored copy from nested CMS blocks, including HTML bodies."""
+    parts = []
+    for node in walk_dicts(value):
+        for field in ("title", "description", "descriptionFull", "subtitle", "text", "html"):
+            text = clean_text(node.get(field))
+            if text and text not in parts:
+                parts.append(text)
+    return " — ".join(parts)
+
+
+def _metric_category(label):
+    label = (label or "").casefold()
+    for patterns, category in (
+        (("террас", "патио", "потол", "квартир", "планиров", "площадь недвижимости"), "layouts"),
+        (("паркинг", "машино-мест", "машиномест"), "parking"),
+        (("сад", "школ", "мест в", "образован"), "infrastructure"),
+        (("парк", "набережн", "бульвар", "благоустрой", "дорожек"), "amenities"),
+        (("метро", "станц", "пешком", "минут", "в пути"), "transport"),
+        (("этаж", "секци", "корпус", "очеред"), "buildings"),
+    ):
+        if any(pattern in label for pattern in patterns):
+            return category
+    return "overview"
+
+
 def normalize_project(row, detail=None, fetched_at=None):
     fetched_at = fetched_at or utcnow()
     slug = row["projectSlug"]
@@ -290,11 +316,12 @@ def normalize_project(row, detail=None, fetched_at=None):
         params = (detail.get("aboutProject") or {}).get("projectParams") or []
         mappings = {
             "корпуса": ("buildings", "building_count"),
+            "секции": ("buildings", "section_count"),
             "этажность": ("buildings", "floor_range"),
+            "комфортная высотность": ("buildings", "floor_range"),
             "класс": ("overview", "project_class"),
             "класс проекта": ("overview", "project_class"),
             "высота потолков": ("layouts", "ceiling_height"),
-            "квартиры": ("layouts", "apartment_count"),
             "количество секций": ("buildings", "section_count"),
             "площадь благоустройства": ("amenities", "landscaping_area"),
             "площадь террас": ("layouts", "terrace_area"),
@@ -304,10 +331,40 @@ def normalize_project(row, detail=None, fetched_at=None):
             label = clean_text(param.get("description"))
             title = clean_text(param.get("title"))
             mapping = mappings.get((label or "").casefold())
+            if (label or "").casefold() == "квартиры" and title:
+                area_range = re.fullmatch(
+                    r"\s*(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*(?:кв\.?\s*м|м[²2])\s*",
+                    title,
+                    re.I,
+                )
+                if area_range:
+                    for key, value in (
+                        ("min_area", area_range.group(1)),
+                        ("max_area", area_range.group(2)),
+                    ):
+                        if not any(
+                            f["key"] == key and f["scope"].get("property_type") == "flat"
+                            for f in facts
+                        ):
+                            facts.append(
+                                make_fact(
+                                    "layouts",
+                                    key,
+                                    value.replace(",", "."),
+                                    url,
+                                    {"projectParams": param, "matched_text": area_range.group(0)},
+                                    value_type="decimal",
+                                    unit="м²",
+                                    scope={"level": "property_type", "property_type": "flat"},
+                                    conditions={"basis": "published_range"},
+                                )
+                            )
+                    continue
             if mapping:
                 category, key = mapping
                 facts.append(make_fact(category, key, title, url, param))
             elif title:
+                scalar_parameter = len(title) <= 240 and not re.search(r"<[^>]+>", title)
                 facts.append(
                     make_fact(
                         "overview",
@@ -315,9 +372,13 @@ def normalize_project(row, detail=None, fetched_at=None):
                         title,
                         url,
                         param,
-                        verified=False,
-                        exclusive=False,
-                        conditions={"label": label},
+                        verified=scalar_parameter,
+                        exclusive=scalar_parameter,
+                        conditions={
+                            "label": label,
+                            "metric_label": label or title,
+                            "basis": "published_project_parameter",
+                        },
                     )
                 )
         # The detailed project page publishes concise, project-scoped scalar
@@ -352,7 +413,24 @@ def normalize_project(row, detail=None, fetched_at=None):
             label = clean_text(metric.get("description"))
             title = clean_text(metric.get("title"))
             mapping = aliases.get((label or "").casefold())
-            if not mapping or not title:
+            if not label or not title:
+                continue
+            if not mapping:
+                metric_key = (
+                    "project_stat_" + hashlib.sha256(label.casefold().encode()).hexdigest()[:16]
+                )
+                facts.append(
+                    make_fact(
+                        _metric_category(label),
+                        metric_key,
+                        title,
+                        url,
+                        metric,
+                        verified=True,
+                        exclusive=True,
+                        conditions={"basis": "published_project_statistic", "metric_label": label},
+                    )
+                )
                 continue
             category, key, unit, value_type = mapping
             if key in emitted or key == "section_count" and any(f["key"] == key for f in facts):
@@ -515,18 +593,35 @@ def normalize_project(row, detail=None, fetched_at=None):
                     benefit,
                 )
             )
+        for card in (detail.get("planningSolutions") or {}).get("cards", []):
+            if not isinstance(card, dict):
+                continue
+            title = clean_text(card.get("title"))
+            if title:
+                card_key = (
+                    "planning_card_"
+                    + hashlib.sha256(
+                        str(card.get("type") or title).casefold().encode()
+                    ).hexdigest()[:16]
+                )
+                facts.append(
+                    make_fact(
+                        "layouts",
+                        card_key,
+                        " — ".join(
+                            part for part in (title, clean_text(card.get("subTitle"))) if part
+                        ),
+                        url,
+                        card,
+                        verified=False,
+                        exclusive=False,
+                        conditions={"claim_type": "layout_filter_description"},
+                    )
+                )
         for category, key, obj in prose_sections:
             if not isinstance(obj, dict):
                 continue
-            parts = [
-                clean_text(obj.get("title")),
-                clean_text(obj.get("description")),
-                clean_text(obj.get("descriptionFull")),
-            ]
-            details = obj.get("details") or {}
-            if isinstance(details, dict):
-                parts += [clean_text(details.get("title")), clean_text(details.get("description"))]
-            text = " — ".join(dict.fromkeys(part for part in parts if part))
+            text = _rich_text(obj)
             if text:
                 planned = bool(
                     re.search(r"будет|планиру|появится|предусмотр|проектиру", text, re.I)
@@ -548,6 +643,60 @@ def normalize_project(row, detail=None, fetched_at=None):
                         },
                     )
                 )
+            if category == "layouts" and obj in (detail.get("benefits") or []):
+                numeric_evidence = " ".join(
+                    clean_text(node.get(field)) or ""
+                    for node in walk_dicts(obj)
+                    for field in ("html", "description", "descriptionFull")
+                )
+                ceiling = re.search(
+                    r"высот\w*\s+потолк\w*\s+от\s*(\d+[,.]?\d*)\s*до\s*(\d+[,.]?\d*)\s*(?:м(?:етр\w*)?)",
+                    numeric_evidence,
+                    re.I,
+                )
+                if ceiling:
+                    for key, value in (
+                        ("min_ceiling_height", ceiling.group(1)),
+                        ("max_ceiling_height", ceiling.group(2)),
+                    ):
+                        if not any(f["key"] == key for f in facts):
+                            facts.append(
+                                make_fact(
+                                    "layouts",
+                                    key,
+                                    value.replace(",", "."),
+                                    url,
+                                    {"benefit": obj, "matched_text": ceiling.group(0)},
+                                    value_type="decimal",
+                                    unit="м",
+                                    scope={"level": "property_type", "property_type": "flat"},
+                                    conditions={"basis": "explicit_published_range"},
+                                )
+                            )
+                area_range = re.search(
+                    r"\bот\b.{0,100}?площадью\s+(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])\s+до\b.{0,100}?площадью\s+(?:до\s+)?(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])",
+                    numeric_evidence,
+                    re.I,
+                )
+                if area_range:
+                    for key, value in (
+                        ("plan_area_min", area_range.group(1)),
+                        ("plan_area_max", area_range.group(2)),
+                    ):
+                        if not any(f["key"] == key for f in facts):
+                            facts.append(
+                                make_fact(
+                                    "layouts",
+                                    key,
+                                    value.replace(",", "."),
+                                    url,
+                                    {"benefit": obj, "matched_text": area_range.group(0)},
+                                    value_type="decimal",
+                                    unit="м²",
+                                    scope={"level": "property_type", "property_type": "flat"},
+                                    conditions={"basis": "explicit_published_range"},
+                                )
+                            )
         for place in (detail.get("infrastructure") or {}).get("mapList") or []:
             travel = place.get("transportAvailability") or {}
             value = {

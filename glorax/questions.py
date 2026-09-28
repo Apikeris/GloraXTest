@@ -54,7 +54,7 @@ __all__ = [
     "eligible_questions",
 ]
 
-TEMPLATE_VERSION = "scalar-5"
+TEMPLATE_VERSION = "scalar-6"
 
 
 VERIFIED = {"verified", "manual_verified"}
@@ -354,6 +354,13 @@ def _conditions_text(revision):
 def make_text(target, project):
     fact = _fact(target)
     template = TEMPLATES.get(fact.key)
+    if template is None and fact.key.startswith(("project_stat_", "parameter_")):
+        template = TEMPLATES["project_metric"]
+    if (target.conditions or {}).get("basis") == "published_upper_bound":
+        if fact.key == "patio_area":
+            return f"Какова максимальная заявленная площадь патио в проекте «{project.name}»?"
+        if fact.key == "terrace_area":
+            return f"Какова максимальная заявленная площадь террас в проекте «{project.name}»?"
     if not template:
         raise ValueError("Нет проверенного шаблона для этой характеристики")
     if fact.key in {"distance", "travel_time", "nearest_transport_minutes"} and not (
@@ -372,6 +379,7 @@ def make_text(target, project):
         category=category or "",
         date=f" по данным на {_aware(target.created_at).strftime('%d.%m.%Y')}",
         conditions=_conditions_text(target),
+        metric_label=(target.conditions or {}).get("metric_label", ""),
     )
 
 
@@ -454,7 +462,10 @@ def generate_questions(dataset_id):
         reasons = freshness_errors(target) + price_errors(target)
         if (
             not target.is_exclusive
-            or fact.key not in TEMPLATES
+            or (
+                fact.key not in TEMPLATES
+                and not fact.key.startswith(("project_stat_", "parameter_"))
+            )
             or (fact.category == "expert" or target.method == "expert_assessment")
         ):
             reasons.append("Нет безопасной автоматической модели единственного ответа")

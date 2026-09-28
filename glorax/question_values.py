@@ -69,6 +69,11 @@ TEMPLATES = {
     "park_area": "Какова площадь парка проекта «{project}»{scope}{conditions}?",
     "terrace_area": "Какова заявленная площадь террас проекта «{project}»{scope}{conditions}?",
     "patio_area": "Какова заявленная площадь патио проекта «{project}»{scope}{conditions}?",
+    "min_ceiling_height": "Какова минимальная заявленная высота потолков в проекте «{project}»{scope}?",
+    "max_ceiling_height": "Какова максимальная заявленная высота потолков в проекте «{project}»{scope}?",
+    "plan_area_min": "Какова минимальная площадь планировок, указанная для проекта «{project}»{scope}?",
+    "plan_area_max": "Какова максимальная площадь планировок, указанная для проекта «{project}»{scope}?",
+    "project_metric": "Какое значение опубликовано для показателя «{metric_label}» в проекте «{project}»?",
     "distance": "Какое расстояние указано для проекта «{project}»{scope}{conditions}?",
     "travel_time": "Какое время в пути до объекта на карте указано для проекта «{project}»{conditions}?",
     "nearest_transport_station": "Какой транспортный объект указан в каталоге для проекта «{project}»{scope}{conditions}?",
@@ -205,7 +210,10 @@ def format_value(revision):
         amount = whole + (("," + fraction) if fraction else "")
         unit = canonical_unit(revision.unit)
         label = {"RUB": "₽", "m2": "м²", "m": "м", "min": "мин"}.get(unit, revision.unit or "")
-        return f"{amount} {label}".strip()
+        displayed = f"{amount} {label}".strip()
+        if (revision.conditions or {}).get("basis") == "published_upper_bound":
+            displayed = "до " + displayed
+        return displayed
     if not isinstance(revision.value, str):
         raise ValueError("Для варианта ответа требуется одно скалярное значение")
     display = unicodedata.normalize("NFKC", revision.value).strip()
