@@ -1,7 +1,8 @@
-from collections import Counter
 import random
+from collections import Counter
 
-from glorax.selection import balanced_sample, test_question_limit as effective_limit
+from glorax.selection import balanced_sample
+from glorax.selection import test_question_limit as effective_limit
 
 
 def pools(sizes):
@@ -9,7 +10,7 @@ def pools(sizes):
 
 
 def test_large_transport_bank_does_not_crowd_out_other_topics():
-    bank = pools({'transport': 80, 'prices': 30, 'layouts': 25, 'location': 20, 'buildings': 20})
+    bank = pools({"transport": 80, "prices": 30, "layouts": 25, "location": 20, "buildings": 20})
     for seed in range(30):
         result = balanced_sample(bank, rng=random.Random(seed))
         assert len(result) == len(set(result)) == 20
@@ -17,21 +18,26 @@ def test_large_transport_bank_does_not_crowd_out_other_topics():
 
 
 def test_scarce_categories_are_included_and_remaining_seats_redistributed():
-    bank = pools({'transport': 80, 'prices': 1, 'layouts': 2, 'location': 3})
+    bank = pools({"transport": 80, "prices": 1, "layouts": 2, "location": 3})
     result = balanced_sample(bank, rng=random.Random(8))
-    assert Counter(category for category, _ in result) == {'transport': 14, 'prices': 1, 'layouts': 2, 'location': 3}
+    assert Counter(category for category, _ in result) == {
+        "transport": 14,
+        "prices": 1,
+        "layouts": 2,
+        "location": 3,
+    }
     assert len(result) == len(set(result)) == 20
     assert sum(len(values) for values in bank.values()) == 86  # Input bank remains intact.
 
 
 def test_small_bank_no_padding_and_single_category():
-    assert len(balanced_sample(pools({'location': 2, 'prices': 3}))) == 5
-    assert len(balanced_sample(pools({'transport': 80}))) == 20
+    assert len(balanced_sample(pools({"location": 2, "prices": 3}))) == 5
+    assert len(balanced_sample(pools({"transport": 80}))) == 20
     assert balanced_sample({}) == []
 
 
 def test_sampling_and_order_vary_between_attempts():
-    bank = pools({'transport': 80, 'prices': 80, 'layouts': 80})
+    bank = pools({"transport": 80, "prices": 80, "layouts": 80})
     first = balanced_sample(bank, rng=random.Random(1))
     second = balanced_sample(bank, rng=random.Random(2))
     assert set(first) != set(second)
@@ -48,10 +54,12 @@ def test_more_categories_than_seats_randomizes_category_ties():
 
 
 def test_explicit_admin_quotas_and_limits_are_respected():
-    bank = pools({'transport': 80, 'prices': 5, 'layouts': 10})
-    result = balanced_sample(bank, limit=9, distribution={'prices': 2, 'layouts': 5}, shuffle=False)
-    assert Counter(category for category, _ in result) == {'prices': 2, 'layouts': 5}
-    assert effective_limit(None, None) == effective_limit(80, 100) == effective_limit(None, 80) == 20
+    bank = pools({"transport": 80, "prices": 5, "layouts": 10})
+    result = balanced_sample(bank, limit=9, distribution={"prices": 2, "layouts": 5}, shuffle=False)
+    assert Counter(category for category, _ in result) == {"prices": 2, "layouts": 5}
+    assert (
+        effective_limit(None, None) == effective_limit(80, 100) == effective_limit(None, 80) == 20
+    )
     assert effective_limit(5, 10) == 5
     assert effective_limit(None, 12) == 12
     assert len(balanced_sample(bank, limit=1000)) == 20

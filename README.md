@@ -168,3 +168,7 @@ python -m glorax.parser --output /secure/output/live-source.json
 # Перенос на Koyeb (бесплатный web-инстанс)
 
 В репозитории есть `Dockerfile`; в Koyeb выберите **Create Web Service → GitHub → Apikeris/GloraXTest**, регион `Frankfurt`, тип инстанса `Free`, порт `8000`, health check `/healthz`. Переменные `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `PGSSLROOTCERT` и содержимое CA-сертификата задаются в Secrets. Бесплатный Koyeb не поддерживает отдельный Worker, поэтому фоновые задания нужно запускать внешним расписанием (например, GitHub Actions) или вручную; не запускайте worker внутри web-контейнера.
+
+## Поддержка и структура кода
+
+Карта модулей, границы транзакций и правила пакетной загрузки описаны в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Для разработки установите `requirements-dev.txt`. Перед изменениями проверяйте стиль командами `python -m ruff check glorax scripts app.py tests` и `python -m ruff format --check glorax scripts app.py tests`, затем запускайте тесты на отдельной PostgreSQL. Контракт маршрутов и ограничения количества SQL-запросов проверяются автоматически.

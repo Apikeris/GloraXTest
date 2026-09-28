@@ -21,3 +21,4 @@ reports/*.html
 reports/browser/
 reports/dataset-export.json
 reports/generation-summary.json
+.ruff_cache/

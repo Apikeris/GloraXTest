@@ -1,4 +1,5 @@
 """Bounded, category-balanced sampling of the published question bank."""
+
 import random
 
 MAX_TEST_QUESTIONS = 20
@@ -11,8 +12,10 @@ def test_question_limit(project_limit=None, default_limit=None):
 
 def allowed_category_counts(counts, distribution=None):
     if distribution:
-        return {category: min(counts.get(category, 0), max(0, int(quota)))
-                for category, quota in distribution.items()}
+        return {
+            category: min(counts.get(category, 0), max(0, int(quota)))
+            for category, quota in distribution.items()
+        }
     return dict(counts)
 
 
@@ -24,7 +27,9 @@ def balanced_sample(buckets, limit=MAX_TEST_QUESTIONS, distribution=None, rng=No
     Explicit administrator quotas remain upper bounds for the named categories.
     """
     rng = rng or random.SystemRandom()
-    counts = allowed_category_counts({key: len(items) for key, items in buckets.items()}, distribution)
+    counts = allowed_category_counts(
+        {key: len(items) for key, items in buckets.items()}, distribution
+    )
     pools = {}
     for category, count in counts.items():
         if count:
