@@ -87,6 +87,637 @@ def _metric_category(label):
     return "overview"
 
 
+def _append_project_metrics(detail, url, facts):
+    params = (detail.get("aboutProject") or {}).get("projectParams") or []
+    mappings = {
+        "корпуса": ("buildings", "building_count"),
+        "секции": ("buildings", "section_count"),
+        "этажность": ("buildings", "floor_range"),
+        "комфортная высотность": ("buildings", "floor_range"),
+        "класс": ("overview", "project_class"),
+        "класс проекта": ("overview", "project_class"),
+        "высота потолков": ("layouts", "ceiling_height"),
+        "количество секций": ("buildings", "section_count"),
+        "площадь благоустройства": ("amenities", "landscaping_area"),
+        "площадь террас": ("layouts", "terrace_area"),
+        "площадь патио": ("layouts", "patio_area"),
+    }
+    for param in params if isinstance(params, list) else []:
+        label = clean_text(param.get("description"))
+        title = clean_text(param.get("title"))
+        mapping = mappings.get((label or "").casefold())
+        if (label or "").casefold() == "квартиры" and title:
+            area_range = re.fullmatch(
+                r"\s*(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*(?:кв\.?\s*м|м[²2])\s*",
+                title,
+                re.I,
+            )
+            if area_range:
+                for key, value in (
+                    ("min_area", area_range.group(1)),
+                    ("max_area", area_range.group(2)),
+                ):
+                    if not any(
+                        f["key"] == key and f["scope"].get("property_type") == "flat" for f in facts
+                    ):
+                        facts.append(
+                            make_fact(
+                                "layouts",
+                                key,
+                                value.replace(",", "."),
+                                url,
+                                {"projectParams": param, "matched_text": area_range.group(0)},
+                                value_type="decimal",
+                                unit="м²",
+                                scope={"level": "property_type", "property_type": "flat"},
+                                conditions={"basis": "published_range"},
+                            )
+                        )
+                continue
+        if mapping:
+            category, key = mapping
+            facts.append(make_fact(category, key, title, url, param))
+        elif title:
+            scalar_parameter = len(title) <= 240 and not re.search(r"<[^>]+>", title)
+            facts.append(
+                make_fact(
+                    "overview",
+                    "parameter_" + hashlib.sha256((label or title).encode()).hexdigest()[:12],
+                    title,
+                    url,
+                    param,
+                    verified=scalar_parameter,
+                    exclusive=scalar_parameter,
+                    conditions={
+                        "label": label,
+                        "metric_label": label or title,
+                        "basis": "published_project_parameter",
+                    },
+                )
+            )
+    # The detailed project page publishes concise, project-scoped scalar
+    # metrics. These are safe to quiz as their literal stated values.
+    aliases = {
+        "площадь участка": ("overview", "land_area", "га", "decimal"),
+        "количество очередей строительства": (
+            "buildings",
+            "construction_phase_count",
+            "очередей",
+            "integer",
+        ),
+        "очереди строительства": (
+            "buildings",
+            "construction_phase_count",
+            "очередей",
+            "integer",
+        ),
+        "количество секций": ("buildings", "section_count", "секций", "integer"),
+        "мест в школе": ("infrastructure", "school_places", "мест", "integer"),
+        "мест в 2 детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
+        "мест в детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
+        "м² площадь патио": ("layouts", "patio_area", "м²", "decimal"),
+        "м² площадь террас": ("layouts", "terrace_area", "м²", "decimal"),
+    }
+    emitted = {
+        f["key"]
+        for f in facts
+        if f["key"] in {"section_count", "landscaping_area", "terrace_area", "patio_area"}
+    }
+    for metric in (detail.get("aboutProject") or {}).get("statistics") or []:
+        label = clean_text(metric.get("description"))
+        title = clean_text(metric.get("title"))
+        mapping = aliases.get((label or "").casefold())
+        if not label or not title:
+            continue
+        if not mapping:
+            metric_key = (
+                "project_stat_" + hashlib.sha256(label.casefold().encode()).hexdigest()[:16]
+            )
+            facts.append(
+                make_fact(
+                    _metric_category(label),
+                    metric_key,
+                    title,
+                    url,
+                    metric,
+                    verified=True,
+                    exclusive=True,
+                    conditions={"basis": "published_project_statistic", "metric_label": label},
+                )
+            )
+            continue
+        category, key, unit, value_type = mapping
+        if key in emitted or key == "section_count" and any(f["key"] == key for f in facts):
+            continue
+        emitted.add(key)
+        raw = re.search(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?", title)
+        value = (
+            raw.group(0).replace(" ", "").replace("\u00a0", "").replace(",", ".") if raw else None
+        )
+        facts.append(
+            make_fact(
+                category,
+                key,
+                value,
+                url,
+                metric,
+                value_type=value_type,
+                unit=unit,
+                verified=bool(value),
+                conditions={
+                    "basis": "published_upper_bound"
+                    if re.search(r"\bдо\b", title, re.I)
+                    else "project_page_metric"
+                },
+                missing_reason="Число не удалось однозначно извлечь" if not value else None,
+            )
+        )
+    # Some detailed pages expose useful capacity only in a project-scoped
+    # structured section, rather than in the shared statistics list.
+    parking_text = clean_text((detail.get("parkingAndStorage") or {}).get("description"))
+    parking_match = re.search(
+        r"(?:паркинг|парковк\w*)[^.]{0,120}?(\d+(?:[\s\u00a0]\d{3})*)\s*машино[- ]мест",
+        parking_text or "",
+        re.I,
+    )
+    if parking_match and not any(f["key"] == "parking_spaces" for f in facts):
+        facts.append(
+            make_fact(
+                "parking",
+                "parking_spaces",
+                parking_match.group(1).replace(" ", "").replace("\u00a0", ""),
+                url,
+                {
+                    "parkingAndStorage": detail["parkingAndStorage"],
+                    "matched_text": parking_match.group(0),
+                },
+                value_type="integer",
+                unit="мест",
+                conditions={"basis": "explicit_project_parking_capacity"},
+            )
+        )
+
+
+def _append_building_layout_facts(detail, url, facts):
+    area_range = re.search(
+        r"(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*м[²2]",
+        (detail.get("aboutProject") or {}).get("descriptionFull", ""),
+        re.I,
+    )
+    if area_range:
+        for key, value in (
+            ("min_area", area_range.group(1)),
+            ("max_area", area_range.group(2)),
+        ):
+            if not any(
+                f["key"] == key and f["scope"].get("property_type") == "flat" for f in facts
+            ):
+                facts.append(
+                    make_fact(
+                        "layouts",
+                        key,
+                        value.replace(",", "."),
+                        url,
+                        {
+                            "aboutProject": detail["aboutProject"],
+                            "matched_text": area_range.group(0),
+                        },
+                        value_type="decimal",
+                        unit="м²",
+                        scope={"level": "property_type", "property_type": "flat"},
+                        conditions={"basis": "published_range"},
+                    )
+                )
+    for building in (detail.get("hero") or {}).get("finishPercentage") or []:
+        if building.get("label"):
+            facts.append(
+                make_fact(
+                    "buildings",
+                    "completion_date",
+                    building.get("finishDate"),
+                    url,
+                    building,
+                    value_type="date",
+                    scope={"level": "building", "name": clean_text(building["label"])},
+                    valid_days=90,
+                )
+            )
+    for queue in (detail.get("constructionProgress") or {}).get("queues") or []:
+        facts.append(
+            make_fact(
+                "buildings",
+                "completion_date",
+                queue.get("finishDate"),
+                url,
+                {k: queue.get(k) for k in ("queueId", "title", "finishDate")},
+                value_type="date",
+                scope={
+                    "level": "queue",
+                    "id": queue.get("queueId"),
+                    "name": clean_text(queue.get("title")),
+                },
+                valid_days=90,
+            )
+        )
+    finishings = detail.get("_finishing_components") or detail.get("finishings") or []
+    for finishing in finishings if isinstance(finishings, list) else []:
+        if isinstance(finishing, dict) and finishing.get("title"):
+            facts.append(
+                make_fact(
+                    "finishing",
+                    "finishing_type",
+                    clean_text(finishing["title"]),
+                    url,
+                    finishing,
+                    scope={
+                        "level": "property_type",
+                        "property_type": detail.get("mainLotType"),
+                        "finishing_code": finishing.get("code"),
+                    },
+                    exclusive=False,
+                )
+            )
+
+
+def _append_project_prose_facts(detail, url, facts):
+    prose_sections = [
+        ("overview", "description", detail.get("aboutProject")),
+        ("layouts", "planning", detail.get("planningSolutions")),
+    ]
+    for benefit in detail.get("benefits") or []:
+        title = clean_text(benefit.get("title")) or ""
+        category = "infrastructure"
+        for pattern, candidate in [
+            (r"архитект|фасад", "architecture"),
+            (r"двор|бульвар|благоустр", "courtyards"),
+            (r"планиров|спальн|террас|пентхаус|потол", "layouts"),
+            (r"паркинг", "parking"),
+            (r"кладов", "storage"),
+            (r"безопас|охран", "security"),
+            (r"лобби|вход", "entrances"),
+        ]:
+            if re.search(pattern, title, re.I):
+                category = candidate
+                break
+        prose_sections.append(
+            (
+                category,
+                "benefit_"
+                + str(benefit.get("id") or hashlib.sha256(title.encode()).hexdigest()[:12]),
+                benefit,
+            )
+        )
+    for card in (detail.get("planningSolutions") or {}).get("cards", []):
+        if not isinstance(card, dict):
+            continue
+        title = clean_text(card.get("title"))
+        if title:
+            card_key = (
+                "planning_card_"
+                + hashlib.sha256(str(card.get("type") or title).casefold().encode()).hexdigest()[
+                    :16
+                ]
+            )
+            facts.append(
+                make_fact(
+                    "layouts",
+                    card_key,
+                    " — ".join(part for part in (title, clean_text(card.get("subTitle"))) if part),
+                    url,
+                    card,
+                    verified=False,
+                    exclusive=False,
+                    conditions={"claim_type": "layout_filter_description"},
+                )
+            )
+    for category, key, obj in prose_sections:
+        if not isinstance(obj, dict):
+            continue
+        text = _rich_text(obj)
+        if text:
+            planned = bool(re.search(r"будет|планиру|появится|предусмотр|проектиру", text, re.I))
+            facts.append(
+                make_fact(
+                    category,
+                    key,
+                    text[:12000],
+                    url,
+                    obj,
+                    verified=False,
+                    exclusive=False,
+                    conditions={
+                        "claim_type": "source_description",
+                        "infrastructure_state": "planned_or_mixed" if planned else "not_verified",
+                    },
+                )
+            )
+        if category == "layouts" and obj in (detail.get("benefits") or []):
+            numeric_evidence = " ".join(
+                clean_text(node.get(field)) or ""
+                for node in walk_dicts(obj)
+                for field in ("html", "description", "descriptionFull")
+            )
+            ceiling = re.search(
+                r"высот\w*\s+потолк\w*\s+от\s*(\d+[,.]?\d*)\s*до\s*(\d+[,.]?\d*)\s*(?:м(?:етр\w*)?)",
+                numeric_evidence,
+                re.I,
+            )
+            if ceiling:
+                for key, value in (
+                    ("min_ceiling_height", ceiling.group(1)),
+                    ("max_ceiling_height", ceiling.group(2)),
+                ):
+                    if not any(f["key"] == key for f in facts):
+                        facts.append(
+                            make_fact(
+                                "layouts",
+                                key,
+                                value.replace(",", "."),
+                                url,
+                                {"benefit": obj, "matched_text": ceiling.group(0)},
+                                value_type="decimal",
+                                unit="м",
+                                scope={"level": "property_type", "property_type": "flat"},
+                                conditions={"basis": "explicit_published_range"},
+                            )
+                        )
+            area_range = re.search(
+                r"\bот\b.{0,100}?площадью\s+(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])\s+до\b.{0,100}?площадью\s+(?:до\s+)?(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])",
+                numeric_evidence,
+                re.I,
+            )
+            if area_range:
+                for key, value in (
+                    ("plan_area_min", area_range.group(1)),
+                    ("plan_area_max", area_range.group(2)),
+                ):
+                    if not any(f["key"] == key for f in facts):
+                        facts.append(
+                            make_fact(
+                                "layouts",
+                                key,
+                                value.replace(",", "."),
+                                url,
+                                {"benefit": obj, "matched_text": area_range.group(0)},
+                                value_type="decimal",
+                                unit="м²",
+                                scope={"level": "property_type", "property_type": "flat"},
+                                conditions={"basis": "explicit_published_range"},
+                            )
+                        )
+    for place in (detail.get("infrastructure") or {}).get("mapList") or []:
+        travel = place.get("transportAvailability") or {}
+        value = {
+            "name": clean_text(place.get("name")),
+            "minutes": travel.get("timeTo"),
+            "transport_mode": travel.get("transportType"),
+            "state": "not_verified",
+        }
+        facts.append(
+            make_fact(
+                "infrastructure",
+                "nearby_" + str(place.get("id")),
+                value,
+                url,
+                place,
+                value_type="json",
+                verified=False,
+                exclusive=False,
+            )
+        )
+
+
+def _append_infrastructure_facts(detail, url, facts, coverage):
+    infrastructure = detail.get("infrastructure") or {}
+    map_list = infrastructure.get("mapList") or []
+    object_count = infrastructure.get("objectCount")
+    valid_map = (
+        isinstance(object_count, int)
+        and not isinstance(object_count, bool)
+        and object_count > 0
+        and len(map_list) == object_count
+        and all(
+            isinstance(place, dict)
+            and place.get("id") is not None
+            and clean_text(place.get("name"))
+            and clean_text(place.get("categoryType"))
+            for place in map_list
+        )
+        and len({str(place["id"]) for place in map_list}) == len(map_list)
+    )
+    if valid_map:
+        destination_names = Counter(
+            unicodedata.normalize("NFKC", clean_text(place["name"])).casefold()
+            for place in map_list
+        )
+        for place in map_list:
+            travel = place.get("transportAvailability") or {}
+            minutes, mode, destination = (
+                travel.get("timeTo"),
+                clean_text(travel.get("transportType")),
+                clean_text(place.get("name")),
+            )
+            destination_key = (
+                unicodedata.normalize("NFKC", destination).casefold() if destination else ""
+            )
+            if (
+                isinstance(minutes, int)
+                and not isinstance(minutes, bool)
+                and minutes > 0
+                and mode
+                and destination
+                and destination_names[destination_key] == 1
+            ):
+                facts.append(
+                    make_fact(
+                        "transport",
+                        "travel_time",
+                        str(minutes),
+                        url,
+                        place,
+                        value_type="integer",
+                        unit="мин",
+                        exclusive=True,
+                        scope={
+                            "level": "destination",
+                            "id": str(place["id"]),
+                            "name": destination,
+                        },
+                        conditions={
+                            "basis": "project_infrastructure_map",
+                            "destination": destination,
+                            "mode": mode,
+                            "map_category_type": clean_text(place.get("categoryType")),
+                        },
+                    )
+                )
+        count_groups = {"all": ("объектов", len(map_list))}
+        labels = {
+            "shops": "магазинов и торговых объектов",
+            "relaxSites": "мест отдыха",
+            "kinderGardens": "детских садов",
+            "sport": "спортивных объектов",
+            "medicine": "медицинских учреждений",
+            "education": "образовательных учреждений",
+            "additionalEducation": "организаций дополнительного образования",
+            "restaurants": "ресторанов и кафе",
+            "transport": "транспортных объектов",
+            "culture": "культурных объектов",
+        }
+        category_counts = Counter(clean_text(place.get("categoryType")) for place in map_list)
+        for category_type, count in category_counts.items():
+            if category_type in labels:
+                count_groups[category_type] = (labels[category_type], count)
+        for category_type, (label, count) in count_groups.items():
+            facts.append(
+                make_fact(
+                    "infrastructure",
+                    "nearby_category_count",
+                    str(count),
+                    url,
+                    {
+                        "objectCount": object_count,
+                        "mapList_ids": [str(p["id"]) for p in map_list],
+                        "matched_count": count,
+                        "category_type": category_type,
+                        "category_label": label,
+                        "completeness_check": "objectCount_equals_unique_mapList_ids",
+                    },
+                    value_type="integer",
+                    verified=True,
+                    exclusive=True,
+                    conditions={
+                        "basis": "complete_project_infrastructure_map",
+                        "category_type": category_type,
+                        "category_label": label,
+                    },
+                )
+            )
+    for document in detail.get("documents") or []:
+        if isinstance(document, dict):
+            document_url, _ = document_url_and_size(document)
+            coverage["documents_for_review"].append(
+                {
+                    "title": clean_text(document.get("title")),
+                    "url": document_url,
+                    "reason": "PDF не интерпретируется автоматически; требуется извлечение и проверка",
+                }
+            )
+
+
+def _record_detail_source_conflicts(detail, url, facts, coverage, price):
+    hero_price = (detail.get("hero") or {}).get("minPrice")
+    if hero_price is not None:
+        coverage["source_conflicts"].append(
+            {
+                "field": "price",
+                "catalog_rub": price,
+                "detail_hero_raw": hero_price,
+                "reason": "Другая единица/округление и возможная акция; нельзя автоматически считать эквивалентом",
+            }
+        )
+    hero_transport = (detail.get("hero") or {}).get("transport") or {}
+    for card in detail.get("infrastructureCards") or []:
+        title = clean_text(card.get("title")) or ""
+        if hero_transport.get("station") and hero_transport["station"] in title:
+            travel = card.get("transportAvailability") or {}
+            if travel.get("transportType") == hero_transport.get("transportType") and travel.get(
+                "timeTo"
+            ) != hero_transport.get("timeTo"):
+                coverage["source_conflicts"].append(
+                    {"field": "transport_minutes", "hero": hero_transport, "card": card}
+                )
+                for fact in facts:
+                    if fact["key"] == "nearest_transport_minutes":
+                        fact["verification_status"] = "needs_review"
+                        fact["conditions"]["conflicting_source_values"] = True
+
+
+def _append_detail_facts(detail, slug, url, price, facts, coverage):
+    _append_project_metrics(detail, url, facts)
+    _append_building_layout_facts(detail, url, facts)
+    _append_project_prose_facts(detail, url, facts)
+    _append_infrastructure_facts(detail, url, facts, coverage)
+    _record_detail_source_conflicts(detail, url, facts, coverage, price)
+
+
+def _append_landing_facts(detail, slug, url, facts, coverage, status):
+    if not detail or not detail.get("_landing"):
+        return facts, status
+    coverage["landing_format"] = True
+    coverage["structured_detail_available"] = detail.get("_structured_details_available", False)
+    coverage["ignored_h1"] = detail.get("_h1_ignored", [])
+    coverage["limitations"].append(
+        "Лендинг: общий H1 не используется, принадлежность подтверждена canonical и projectSlug"
+    )
+    logs = detail.get("_landing_logs") or {}
+    if not logs:
+        coverage["limitations"].append(
+            "Лендинг не предоставляет связанный logs: подробности требуют ручной проверки, сохранены только факты каталога"
+        )
+    hero = logs.get("heroScreen") or {}
+    if hero.get("address"):
+        facts = [f for f in facts if f["key"] != "address"]
+        facts.append(
+            make_fact(
+                "location",
+                "address",
+                clean_text(hero["address"]),
+                url,
+                {"projectSlug": slug, "heroScreen": hero},
+            )
+        )
+    progress = hero.get("progress") or {}
+    if progress.get("isCompleted") is True:
+        status = "Завершён"
+        facts = [f for f in facts if f["key"] != "status"]
+        facts.append(
+            make_fact(
+                "overview", "status", status, url, {"projectSlug": slug, "progress": progress}
+            )
+        )
+    for section, category in [
+        ("aboutView", "overview"),
+        ("houseWithHistory", "architecture"),
+        ("architectureView", "architecture"),
+        ("residentClub", "infrastructure"),
+        ("parkingView", "parking"),
+        ("apartmentLayoutsView", "layouts"),
+        ("openTheDoorView", "entrances"),
+        ("benefitCardsView", "features"),
+    ]:
+        obj = logs.get(section)
+        if not obj:
+            continue
+        texts = []
+        for part in walk_dicts(obj):
+            for key in ("title", "description", "text", "subtitle"):
+                value = clean_text(part.get(key))
+                if value and value not in texts:
+                    texts.append(value)
+        if texts:
+            facts.append(
+                make_fact(
+                    category,
+                    "landing_" + section,
+                    " — ".join(texts)[:12000],
+                    url,
+                    obj,
+                    verified=False,
+                    exclusive=False,
+                    conditions={
+                        "claim_type": "source_description",
+                        "infrastructure_state": "not_verified",
+                    },
+                )
+            )
+    for document in (logs.get("documents") or {}).get("documents", []):
+        coverage["documents_for_review"].append(
+            {"data": document, "reason": "Документ лендинга требует извлечения и проверки"}
+        )
+    return facts, status
+
+
 def normalize_project(row, detail=None, fetched_at=None):
     fetched_at = fetched_at or utcnow()
     slug = row["projectSlug"]
@@ -313,625 +944,8 @@ def normalize_project(row, detail=None, fetched_at=None):
         ],
     }
     if detail:
-        params = (detail.get("aboutProject") or {}).get("projectParams") or []
-        mappings = {
-            "корпуса": ("buildings", "building_count"),
-            "секции": ("buildings", "section_count"),
-            "этажность": ("buildings", "floor_range"),
-            "комфортная высотность": ("buildings", "floor_range"),
-            "класс": ("overview", "project_class"),
-            "класс проекта": ("overview", "project_class"),
-            "высота потолков": ("layouts", "ceiling_height"),
-            "количество секций": ("buildings", "section_count"),
-            "площадь благоустройства": ("amenities", "landscaping_area"),
-            "площадь террас": ("layouts", "terrace_area"),
-            "площадь патио": ("layouts", "patio_area"),
-        }
-        for param in params if isinstance(params, list) else []:
-            label = clean_text(param.get("description"))
-            title = clean_text(param.get("title"))
-            mapping = mappings.get((label or "").casefold())
-            if (label or "").casefold() == "квартиры" and title:
-                area_range = re.fullmatch(
-                    r"\s*(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*(?:кв\.?\s*м|м[²2])\s*",
-                    title,
-                    re.I,
-                )
-                if area_range:
-                    for key, value in (
-                        ("min_area", area_range.group(1)),
-                        ("max_area", area_range.group(2)),
-                    ):
-                        if not any(
-                            f["key"] == key and f["scope"].get("property_type") == "flat"
-                            for f in facts
-                        ):
-                            facts.append(
-                                make_fact(
-                                    "layouts",
-                                    key,
-                                    value.replace(",", "."),
-                                    url,
-                                    {"projectParams": param, "matched_text": area_range.group(0)},
-                                    value_type="decimal",
-                                    unit="м²",
-                                    scope={"level": "property_type", "property_type": "flat"},
-                                    conditions={"basis": "published_range"},
-                                )
-                            )
-                    continue
-            if mapping:
-                category, key = mapping
-                facts.append(make_fact(category, key, title, url, param))
-            elif title:
-                scalar_parameter = len(title) <= 240 and not re.search(r"<[^>]+>", title)
-                facts.append(
-                    make_fact(
-                        "overview",
-                        "parameter_" + hashlib.sha256((label or title).encode()).hexdigest()[:12],
-                        title,
-                        url,
-                        param,
-                        verified=scalar_parameter,
-                        exclusive=scalar_parameter,
-                        conditions={
-                            "label": label,
-                            "metric_label": label or title,
-                            "basis": "published_project_parameter",
-                        },
-                    )
-                )
-        # The detailed project page publishes concise, project-scoped scalar
-        # metrics. These are safe to quiz as their literal stated values.
-        aliases = {
-            "площадь участка": ("overview", "land_area", "га", "decimal"),
-            "количество очередей строительства": (
-                "buildings",
-                "construction_phase_count",
-                "очередей",
-                "integer",
-            ),
-            "очереди строительства": (
-                "buildings",
-                "construction_phase_count",
-                "очередей",
-                "integer",
-            ),
-            "количество секций": ("buildings", "section_count", "секций", "integer"),
-            "мест в школе": ("infrastructure", "school_places", "мест", "integer"),
-            "мест в 2 детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
-            "мест в детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
-            "м² площадь патио": ("layouts", "patio_area", "м²", "decimal"),
-            "м² площадь террас": ("layouts", "terrace_area", "м²", "decimal"),
-        }
-        emitted = {
-            f["key"]
-            for f in facts
-            if f["key"] in {"section_count", "landscaping_area", "terrace_area", "patio_area"}
-        }
-        for metric in (detail.get("aboutProject") or {}).get("statistics") or []:
-            label = clean_text(metric.get("description"))
-            title = clean_text(metric.get("title"))
-            mapping = aliases.get((label or "").casefold())
-            if not label or not title:
-                continue
-            if not mapping:
-                metric_key = (
-                    "project_stat_" + hashlib.sha256(label.casefold().encode()).hexdigest()[:16]
-                )
-                facts.append(
-                    make_fact(
-                        _metric_category(label),
-                        metric_key,
-                        title,
-                        url,
-                        metric,
-                        verified=True,
-                        exclusive=True,
-                        conditions={"basis": "published_project_statistic", "metric_label": label},
-                    )
-                )
-                continue
-            category, key, unit, value_type = mapping
-            if key in emitted or key == "section_count" and any(f["key"] == key for f in facts):
-                continue
-            emitted.add(key)
-            raw = re.search(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?", title)
-            value = (
-                raw.group(0).replace(" ", "").replace("\u00a0", "").replace(",", ".")
-                if raw
-                else None
-            )
-            facts.append(
-                make_fact(
-                    category,
-                    key,
-                    value,
-                    url,
-                    metric,
-                    value_type=value_type,
-                    unit=unit,
-                    verified=bool(value),
-                    conditions={
-                        "basis": "published_upper_bound"
-                        if re.search(r"\bдо\b", title, re.I)
-                        else "project_page_metric"
-                    },
-                    missing_reason="Число не удалось однозначно извлечь" if not value else None,
-                )
-            )
-        # Some detailed pages expose useful capacity only in a project-scoped
-        # structured section, rather than in the shared statistics list.
-        parking_text = clean_text((detail.get("parkingAndStorage") or {}).get("description"))
-        parking_match = re.search(
-            r"(?:паркинг|парковк\w*)[^.]{0,120}?(\d+(?:[\s\u00a0]\d{3})*)\s*машино[- ]мест",
-            parking_text or "",
-            re.I,
-        )
-        if parking_match and not any(f["key"] == "parking_spaces" for f in facts):
-            facts.append(
-                make_fact(
-                    "parking",
-                    "parking_spaces",
-                    parking_match.group(1).replace(" ", "").replace("\u00a0", ""),
-                    url,
-                    {
-                        "parkingAndStorage": detail["parkingAndStorage"],
-                        "matched_text": parking_match.group(0),
-                    },
-                    value_type="integer",
-                    unit="мест",
-                    conditions={"basis": "explicit_project_parking_capacity"},
-                )
-            )
-        # A visible range is two independent facts; never infer area bounds
-        # from a single apartment or from an image.
-        area_range = re.search(
-            r"(\d+(?:[,.]\d+)?)\s*[-–—]\s*(\d+(?:[,.]\d+)?)\s*м[²2]",
-            (detail.get("aboutProject") or {}).get("descriptionFull", ""),
-            re.I,
-        )
-        if area_range:
-            for key, value in (
-                ("min_area", area_range.group(1)),
-                ("max_area", area_range.group(2)),
-            ):
-                if not any(
-                    f["key"] == key and f["scope"].get("property_type") == "flat" for f in facts
-                ):
-                    facts.append(
-                        make_fact(
-                            "layouts",
-                            key,
-                            value.replace(",", "."),
-                            url,
-                            {
-                                "aboutProject": detail["aboutProject"],
-                                "matched_text": area_range.group(0),
-                            },
-                            value_type="decimal",
-                            unit="м²",
-                            scope={"level": "property_type", "property_type": "flat"},
-                            conditions={"basis": "published_range"},
-                        )
-                    )
-        for building in (detail.get("hero") or {}).get("finishPercentage") or []:
-            if building.get("label"):
-                facts.append(
-                    make_fact(
-                        "buildings",
-                        "completion_date",
-                        building.get("finishDate"),
-                        url,
-                        building,
-                        value_type="date",
-                        scope={"level": "building", "name": clean_text(building["label"])},
-                        valid_days=90,
-                    )
-                )
-        for queue in (detail.get("constructionProgress") or {}).get("queues") or []:
-            facts.append(
-                make_fact(
-                    "buildings",
-                    "completion_date",
-                    queue.get("finishDate"),
-                    url,
-                    {k: queue.get(k) for k in ("queueId", "title", "finishDate")},
-                    value_type="date",
-                    scope={
-                        "level": "queue",
-                        "id": queue.get("queueId"),
-                        "name": clean_text(queue.get("title")),
-                    },
-                    valid_days=90,
-                )
-            )
-        finishings = detail.get("_finishing_components") or detail.get("finishings") or []
-        for finishing in finishings if isinstance(finishings, list) else []:
-            if isinstance(finishing, dict) and finishing.get("title"):
-                facts.append(
-                    make_fact(
-                        "finishing",
-                        "finishing_type",
-                        clean_text(finishing["title"]),
-                        url,
-                        finishing,
-                        scope={
-                            "level": "property_type",
-                            "property_type": detail.get("mainLotType"),
-                            "finishing_code": finishing.get("code"),
-                        },
-                        exclusive=False,
-                    )
-                )
-        # Prose belongs to this project, but a human must approve semantics,
-        # planned/existing distinction and any claim of absence.
-        prose_sections = [
-            ("overview", "description", detail.get("aboutProject")),
-            ("layouts", "planning", detail.get("planningSolutions")),
-        ]
-        for benefit in detail.get("benefits") or []:
-            title = clean_text(benefit.get("title")) or ""
-            category = "infrastructure"
-            for pattern, candidate in [
-                (r"архитект|фасад", "architecture"),
-                (r"двор|бульвар|благоустр", "courtyards"),
-                (r"планиров|спальн|террас|пентхаус|потол", "layouts"),
-                (r"паркинг", "parking"),
-                (r"кладов", "storage"),
-                (r"безопас|охран", "security"),
-                (r"лобби|вход", "entrances"),
-            ]:
-                if re.search(pattern, title, re.I):
-                    category = candidate
-                    break
-            prose_sections.append(
-                (
-                    category,
-                    "benefit_"
-                    + str(benefit.get("id") or hashlib.sha256(title.encode()).hexdigest()[:12]),
-                    benefit,
-                )
-            )
-        for card in (detail.get("planningSolutions") or {}).get("cards", []):
-            if not isinstance(card, dict):
-                continue
-            title = clean_text(card.get("title"))
-            if title:
-                card_key = (
-                    "planning_card_"
-                    + hashlib.sha256(
-                        str(card.get("type") or title).casefold().encode()
-                    ).hexdigest()[:16]
-                )
-                facts.append(
-                    make_fact(
-                        "layouts",
-                        card_key,
-                        " — ".join(
-                            part for part in (title, clean_text(card.get("subTitle"))) if part
-                        ),
-                        url,
-                        card,
-                        verified=False,
-                        exclusive=False,
-                        conditions={"claim_type": "layout_filter_description"},
-                    )
-                )
-        for category, key, obj in prose_sections:
-            if not isinstance(obj, dict):
-                continue
-            text = _rich_text(obj)
-            if text:
-                planned = bool(
-                    re.search(r"будет|планиру|появится|предусмотр|проектиру", text, re.I)
-                )
-                facts.append(
-                    make_fact(
-                        category,
-                        key,
-                        text[:12000],
-                        url,
-                        obj,
-                        verified=False,
-                        exclusive=False,
-                        conditions={
-                            "claim_type": "source_description",
-                            "infrastructure_state": "planned_or_mixed"
-                            if planned
-                            else "not_verified",
-                        },
-                    )
-                )
-            if category == "layouts" and obj in (detail.get("benefits") or []):
-                numeric_evidence = " ".join(
-                    clean_text(node.get(field)) or ""
-                    for node in walk_dicts(obj)
-                    for field in ("html", "description", "descriptionFull")
-                )
-                ceiling = re.search(
-                    r"высот\w*\s+потолк\w*\s+от\s*(\d+[,.]?\d*)\s*до\s*(\d+[,.]?\d*)\s*(?:м(?:етр\w*)?)",
-                    numeric_evidence,
-                    re.I,
-                )
-                if ceiling:
-                    for key, value in (
-                        ("min_ceiling_height", ceiling.group(1)),
-                        ("max_ceiling_height", ceiling.group(2)),
-                    ):
-                        if not any(f["key"] == key for f in facts):
-                            facts.append(
-                                make_fact(
-                                    "layouts",
-                                    key,
-                                    value.replace(",", "."),
-                                    url,
-                                    {"benefit": obj, "matched_text": ceiling.group(0)},
-                                    value_type="decimal",
-                                    unit="м",
-                                    scope={"level": "property_type", "property_type": "flat"},
-                                    conditions={"basis": "explicit_published_range"},
-                                )
-                            )
-                area_range = re.search(
-                    r"\bот\b.{0,100}?площадью\s+(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])\s+до\b.{0,100}?площадью\s+(?:до\s+)?(\d+[,.]?\d*)\s*(?:кв\.?\s*м|м[²2])",
-                    numeric_evidence,
-                    re.I,
-                )
-                if area_range:
-                    for key, value in (
-                        ("plan_area_min", area_range.group(1)),
-                        ("plan_area_max", area_range.group(2)),
-                    ):
-                        if not any(f["key"] == key for f in facts):
-                            facts.append(
-                                make_fact(
-                                    "layouts",
-                                    key,
-                                    value.replace(",", "."),
-                                    url,
-                                    {"benefit": obj, "matched_text": area_range.group(0)},
-                                    value_type="decimal",
-                                    unit="м²",
-                                    scope={"level": "property_type", "property_type": "flat"},
-                                    conditions={"basis": "explicit_published_range"},
-                                )
-                            )
-        for place in (detail.get("infrastructure") or {}).get("mapList") or []:
-            travel = place.get("transportAvailability") or {}
-            value = {
-                "name": clean_text(place.get("name")),
-                "minutes": travel.get("timeTo"),
-                "transport_mode": travel.get("transportType"),
-                "state": "not_verified",
-            }
-            facts.append(
-                make_fact(
-                    "infrastructure",
-                    "nearby_" + str(place.get("id")),
-                    value,
-                    url,
-                    place,
-                    value_type="json",
-                    verified=False,
-                    exclusive=False,
-                )
-            )
-        # Exact counts are useful, project-scoped quiz facts only when the
-        # site's own total proves that its map list is complete. An empty or
-        # truncated list must never be interpreted as zero.
-        infrastructure = detail.get("infrastructure") or {}
-        map_list = infrastructure.get("mapList") or []
-        object_count = infrastructure.get("objectCount")
-        valid_map = (
-            isinstance(object_count, int)
-            and not isinstance(object_count, bool)
-            and object_count > 0
-            and len(map_list) == object_count
-            and all(
-                isinstance(place, dict)
-                and place.get("id") is not None
-                and clean_text(place.get("name"))
-                and clean_text(place.get("categoryType"))
-                for place in map_list
-            )
-            and len({str(place["id"]) for place in map_list}) == len(map_list)
-        )
-        if valid_map:
-            destination_names = Counter(
-                unicodedata.normalize("NFKC", clean_text(place["name"])).casefold()
-                for place in map_list
-            )
-            for place in map_list:
-                travel = place.get("transportAvailability") or {}
-                minutes, mode, destination = (
-                    travel.get("timeTo"),
-                    clean_text(travel.get("transportType")),
-                    clean_text(place.get("name")),
-                )
-                destination_key = (
-                    unicodedata.normalize("NFKC", destination).casefold() if destination else ""
-                )
-                if (
-                    isinstance(minutes, int)
-                    and not isinstance(minutes, bool)
-                    and minutes > 0
-                    and mode
-                    and destination
-                    and destination_names[destination_key] == 1
-                ):
-                    facts.append(
-                        make_fact(
-                            "transport",
-                            "travel_time",
-                            str(minutes),
-                            url,
-                            place,
-                            value_type="integer",
-                            unit="мин",
-                            exclusive=True,
-                            scope={
-                                "level": "destination",
-                                "id": str(place["id"]),
-                                "name": destination,
-                            },
-                            conditions={
-                                "basis": "project_infrastructure_map",
-                                "destination": destination,
-                                "mode": mode,
-                                "map_category_type": clean_text(place.get("categoryType")),
-                            },
-                        )
-                    )
-            count_groups = {"all": ("объектов", len(map_list))}
-            labels = {
-                "shops": "магазинов и торговых объектов",
-                "relaxSites": "мест отдыха",
-                "kinderGardens": "детских садов",
-                "sport": "спортивных объектов",
-                "medicine": "медицинских учреждений",
-                "education": "образовательных учреждений",
-                "additionalEducation": "организаций дополнительного образования",
-                "restaurants": "ресторанов и кафе",
-                "transport": "транспортных объектов",
-                "culture": "культурных объектов",
-            }
-            category_counts = Counter(clean_text(place.get("categoryType")) for place in map_list)
-            for category_type, count in category_counts.items():
-                if category_type in labels:
-                    count_groups[category_type] = (labels[category_type], count)
-            for category_type, (label, count) in count_groups.items():
-                facts.append(
-                    make_fact(
-                        "infrastructure",
-                        "nearby_category_count",
-                        str(count),
-                        url,
-                        {
-                            "objectCount": object_count,
-                            "mapList_ids": [str(p["id"]) for p in map_list],
-                            "matched_count": count,
-                            "category_type": category_type,
-                            "category_label": label,
-                            "completeness_check": "objectCount_equals_unique_mapList_ids",
-                        },
-                        value_type="integer",
-                        verified=True,
-                        exclusive=True,
-                        conditions={
-                            "basis": "complete_project_infrastructure_map",
-                            "category_type": category_type,
-                            "category_label": label,
-                        },
-                    )
-                )
-        for document in detail.get("documents") or []:
-            if isinstance(document, dict):
-                document_url, _ = document_url_and_size(document)
-                coverage["documents_for_review"].append(
-                    {
-                        "title": clean_text(document.get("title")),
-                        "url": document_url,
-                        "reason": "PDF не интерпретируется автоматически; требуется извлечение и проверка",
-                    }
-                )
-        hero_price = (detail.get("hero") or {}).get("minPrice")
-        if hero_price is not None:
-            coverage["source_conflicts"].append(
-                {
-                    "field": "price",
-                    "catalog_rub": price,
-                    "detail_hero_raw": hero_price,
-                    "reason": "Другая единица/округление и возможная акция; нельзя автоматически считать эквивалентом",
-                }
-            )
-        hero_transport = (detail.get("hero") or {}).get("transport") or {}
-        for card in detail.get("infrastructureCards") or []:
-            title = clean_text(card.get("title")) or ""
-            if hero_transport.get("station") and hero_transport["station"] in title:
-                travel = card.get("transportAvailability") or {}
-                if travel.get("transportType") == hero_transport.get(
-                    "transportType"
-                ) and travel.get("timeTo") != hero_transport.get("timeTo"):
-                    coverage["source_conflicts"].append(
-                        {"field": "transport_minutes", "hero": hero_transport, "card": card}
-                    )
-                    for fact in facts:
-                        if fact["key"] == "nearest_transport_minutes":
-                            fact["verification_status"] = "needs_review"
-                            fact["conditions"]["conflicting_source_values"] = True
-    if detail and detail.get("_landing"):
-        coverage["landing_format"] = True
-        coverage["structured_detail_available"] = detail.get("_structured_details_available", False)
-        coverage["ignored_h1"] = detail.get("_h1_ignored", [])
-        coverage["limitations"].append(
-            "Лендинг: общий H1 не используется, принадлежность подтверждена canonical и projectSlug"
-        )
-        logs = detail.get("_landing_logs") or {}
-        if not logs:
-            coverage["limitations"].append(
-                "Лендинг не предоставляет связанный logs: подробности требуют ручной проверки, сохранены только факты каталога"
-            )
-        hero = logs.get("heroScreen") or {}
-        if hero.get("address"):
-            facts = [f for f in facts if f["key"] != "address"]
-            facts.append(
-                make_fact(
-                    "location",
-                    "address",
-                    clean_text(hero["address"]),
-                    url,
-                    {"projectSlug": slug, "heroScreen": hero},
-                )
-            )
-        progress = hero.get("progress") or {}
-        if progress.get("isCompleted") is True:
-            status = "Завершён"
-            facts = [f for f in facts if f["key"] != "status"]
-            facts.append(
-                make_fact(
-                    "overview", "status", status, url, {"projectSlug": slug, "progress": progress}
-                )
-            )
-        for section, category in [
-            ("aboutView", "overview"),
-            ("houseWithHistory", "architecture"),
-            ("architectureView", "architecture"),
-            ("residentClub", "infrastructure"),
-            ("parkingView", "parking"),
-            ("apartmentLayoutsView", "layouts"),
-            ("openTheDoorView", "entrances"),
-            ("benefitCardsView", "features"),
-        ]:
-            obj = logs.get(section)
-            if not obj:
-                continue
-            texts = []
-            for part in walk_dicts(obj):
-                for key in ("title", "description", "text", "subtitle"):
-                    value = clean_text(part.get(key))
-                    if value and value not in texts:
-                        texts.append(value)
-            if texts:
-                facts.append(
-                    make_fact(
-                        category,
-                        "landing_" + section,
-                        " — ".join(texts)[:12000],
-                        url,
-                        obj,
-                        verified=False,
-                        exclusive=False,
-                        conditions={
-                            "claim_type": "source_description",
-                            "infrastructure_state": "not_verified",
-                        },
-                    )
-                )
-        for document in (logs.get("documents") or {}).get("documents", []):
-            coverage["documents_for_review"].append(
-                {"data": document, "reason": "Документ лендинга требует извлечения и проверки"}
-            )
+        _append_detail_facts(detail, slug, url, price, facts, coverage)
+    facts, status = _append_landing_facts(detail, slug, url, facts, coverage, status)
     # API gives technical dates while public cards show quarters. Preserve raw
     # date as a candidate; publish only the quarter, avoiding false day precision.
     quarterly = []
