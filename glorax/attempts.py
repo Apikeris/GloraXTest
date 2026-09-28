@@ -194,8 +194,11 @@ def start_test():
     attempt=Attempt(participant_id=participant.id,full_name=name,project_id=project.id,project_name=project.name,session_hash=session_hash(),dataset_id=dataset.id if dataset else None,total=len(questions),settings={'seconds_per_question':20,'question_limit':test_question_limit(project.question_limit, get_setting('question_limit')),'selection_policy':'balanced_categories_v1','topic_distribution':project.topic_distribution,'selected_categories':{},'show_review':bool(get_setting('show_review',False))})
     db.session.add(attempt);db.session.flush()
     selected_categories = {}
+    revisions = {revision.id: revision for revision in db.session.scalars(
+        db.select(QuestionRevision).where(QuestionRevision.id.in_(
+            [question.current_revision_id for question in questions])))}
     for position,q in enumerate(questions,1):
-        revision=db.session.get(QuestionRevision,q.current_revision_id)
+        revision=revisions[q.current_revision_id]
         selected_categories[revision.category] = selected_categories.get(revision.category, 0) + 1
         options=[];correct=None
         for option in revision.options:

@@ -506,8 +506,7 @@ def _preload_question_validation(questions, project_ids=()):
     fact_ids = {revision.fact_id for revision in fact_revisions}
     facts = list(db.session.scalars(db.select(Fact).where(Fact.id.in_(fact_ids)))) if fact_ids else []
     related_project_ids = set(project_ids) | {fact.project_id for fact in facts}
-    if related_project_ids:
-        list(db.session.scalars(db.select(Project).where(Project.id.in_(related_project_ids))))
+    projects = list(db.session.scalars(db.select(Project).where(Project.id.in_(related_project_ids)))) if related_project_ids else []
     cache = db.session.info.setdefault('glorax_dataset_members_cache', {})
     missing_datasets = dataset_ids - cache.keys()
     if missing_datasets:
@@ -515,7 +514,10 @@ def _preload_question_validation(questions, project_ids=()):
         for row in db.session.scalars(db.select(DatasetFact).where(DatasetFact.dataset_id.in_(missing_datasets))):
             grouped[row.dataset_id].add(row.revision_id)
         cache.update(grouped)
-    return {revision.id: revision for revision in question_revisions}
+    # SQLAlchemy's identity map holds weak references. Keep these objects alive
+    # throughout validation, otherwise every Session.get below fetches the same
+    # facts/projects again over the network despite this batch preload.
+    return {revision.id: revision for revision in question_revisions}, fact_revisions + facts + projects
 
 
 def eligible_questions_for_projects(projects):
@@ -529,7 +531,7 @@ def eligible_questions_for_projects(projects):
             Question.project_id.in_(by_id), Question.status == 'published'
         ).order_by(Question.project_id, Question.id)
     ))
-    revisions_by_id = _preload_question_validation(questions, by_id)
+    revisions_by_id, validation_entities = _preload_question_validation(questions, by_id)
     for question in questions:
         revision = revisions_by_id.get(question.current_revision_id)
         if revision and (question.origin == 'generated' or revision.semantic_reviewed) and not validate_revision(revision, semantic_review=True):

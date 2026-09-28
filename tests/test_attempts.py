@@ -161,7 +161,21 @@ def test_large_bank_balanced_persisted_sample_and_shuffled_options(app, client, 
         # A previously stored oversized setting cannot defeat the hard cap.
         project.question_limit = 80
         db.session.commit()
-    first_id = start(client, project_id)
+    # Count queries in a fresh request: seed-session identity references must
+    # not hide an N+1 regression against a remote PostgreSQL database.
+    from sqlalchemy import event
+    selects = []
+    def count_selects(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith('SELECT'):
+            selects.append(statement)
+    with app.app_context():
+        engine = db.engine
+    event.listen(engine, 'before_cursor_execute', count_selects)
+    try:
+        first_id = start(client, project_id)
+    finally:
+        event.remove(engine, 'before_cursor_execute', count_selects)
+    assert len(selects) <= 20, f'Start issued {len(selects)} SELECT queries for a 112-question bank'
     first_question = current(client, first_id)
     assert client.get(f'/test/{first_id}').status_code == 200
     restored_question = current(client, first_id)
