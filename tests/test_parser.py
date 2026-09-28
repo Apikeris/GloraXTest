@@ -124,8 +124,10 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
                 {"title": "4", "description": "очереди строительства"},
                 {"title": "720", "description": "мест в 2 детских садах"},
                 {"title": "1150", "description": "мест в школе"},
+                {"title": "до 41,2", "description": "м² площадь патио"},
             ],
-        }
+        },
+        "parkingAndStorage": {"description": "Подземный паркинг рассчитан на 306 машино-мест"},
     }
     facts = normalize_project(row, detail, "2026-09-27T01:00:00+00:00")["facts"]
     room_prices = [
@@ -153,6 +155,8 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
             "kindergarten_places",
             "school_places",
             "section_count",
+            "patio_area",
+            "parking_spaces",
         }
     }
     assert metrics["land_area"]["value"] == "46.8" and metrics["land_area"]["unit"] == "га"
@@ -160,6 +164,9 @@ def test_room_type_prices_and_project_metrics_create_scoped_facts():
     assert metrics["kindergarten_places"]["value"] == "720"
     assert metrics["school_places"]["value"] == "1150"
     assert metrics["section_count"]["value"] == "5"
+    assert metrics["patio_area"]["value"] == "41.2"
+    assert metrics["patio_area"]["conditions"]["basis"] == "published_upper_bound"
+    assert metrics["parking_spaces"]["value"] == "306"
 
 
 def test_complete_infrastructure_map_yields_only_exact_count_facts():

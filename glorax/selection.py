@@ -3,6 +3,7 @@
 import random
 
 MAX_TEST_QUESTIONS = 20
+MAX_QUESTIONS_PER_CATEGORY = 5
 
 
 def test_question_limit(project_limit=None, default_limit=None):
@@ -11,32 +12,60 @@ def test_question_limit(project_limit=None, default_limit=None):
 
 
 def allowed_category_counts(counts, distribution=None):
+    """Apply the per-topic ceiling as well as any explicit project quota."""
     if distribution:
         return {
-            category: min(counts.get(category, 0), max(0, int(quota)))
+            category: min(
+                counts.get(category, 0),
+                max(0, int(quota)),
+                MAX_QUESTIONS_PER_CATEGORY,
+            )
             for category, quota in distribution.items()
         }
-    return dict(counts)
+    return {category: min(count, MAX_QUESTIONS_PER_CATEGORY) for category, count in counts.items()}
 
 
 def balanced_sample(buckets, limit=MAX_TEST_QUESTIONS, distribution=None, rng=None, shuffle=True):
-    """Take one per category per round, redistributing seats as buckets empty.
+    """Select across categories and fact families without overfilling a topic.
 
-    Both the within-category sample and ties between categories are random.
-    The final independent shuffle hides the sampling order from participants.
-    Explicit administrator quotas remain upper bounds for the named categories.
+    Bucket keys may be a category or ``(category, family)``. Sampling rotates
+    among families (for example, among school/metro/park transport facts), then
+    among categories. A project with too few eligible categories produces a
+    shorter quiz instead of allowing a single subject to exceed the hard cap.
     """
     rng = rng or random.SystemRandom()
+    grouped = {}
+    for key, items in buckets.items():
+        category, family = key if isinstance(key, tuple) else (key, "default")
+        grouped.setdefault(category, {})[family] = list(items)
     counts = allowed_category_counts(
-        {key: len(items) for key, items in buckets.items()}, distribution
+        {category: sum(map(len, families.values())) for category, families in grouped.items()},
+        distribution,
     )
     pools = {}
     for category, count in counts.items():
         if count:
-            items = list(buckets[category])
+            families = {}
+            for family, source_items in grouped[category].items():
+                items = list(source_items)
+                if shuffle:
+                    rng.shuffle(items)
+                if items:
+                    families[family] = items
+            family_names = list(families)
             if shuffle:
-                rng.shuffle(items)
-            pools[category] = items[:count]
+                rng.shuffle(family_names)
+            selected = []
+            while family_names and len(selected) < count:
+                remaining = []
+                for family in family_names:
+                    selected.append(families[family].pop())
+                    if families[family]:
+                        remaining.append(family)
+                    if len(selected) == count:
+                        break
+                family_names = remaining
+            pools[category] = selected
     categories = list(pools)
     if shuffle:
         rng.shuffle(categories)

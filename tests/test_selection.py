@@ -17,23 +17,42 @@ def test_large_transport_bank_does_not_crowd_out_other_topics():
         assert Counter(category for category, _ in result) == {category: 4 for category in bank}
 
 
-def test_scarce_categories_are_included_and_remaining_seats_redistributed():
+def test_scarce_categories_are_included_but_no_category_exceeds_five():
     bank = pools({"transport": 80, "prices": 1, "layouts": 2, "location": 3})
     result = balanced_sample(bank, rng=random.Random(8))
     assert Counter(category for category, _ in result) == {
-        "transport": 14,
+        "transport": 5,
         "prices": 1,
         "layouts": 2,
         "location": 3,
     }
-    assert len(result) == len(set(result)) == 20
+    assert len(result) == len(set(result)) == 11
     assert sum(len(values) for values in bank.values()) == 86  # Input bank remains intact.
 
 
 def test_small_bank_no_padding_and_single_category():
     assert len(balanced_sample(pools({"location": 2, "prices": 3}))) == 5
-    assert len(balanced_sample(pools({"transport": 80}))) == 20
+    assert len(balanced_sample(pools({"transport": 80}))) == 5
     assert balanced_sample({}) == []
+
+
+def test_family_sampling_spreads_transport_across_map_categories():
+    bank = {
+        ("transport", "school"): [("transport", "school", i) for i in range(50)],
+        ("transport", "kindergarten"): [("transport", "kindergarten", i) for i in range(30)],
+        ("transport", "metro"): [("transport", "metro", i) for i in range(8)],
+        ("prices", "flat"): [("prices", "flat", i) for i in range(8)],
+        ("layouts", "area"): [("layouts", "area", i) for i in range(8)],
+        ("buildings", "floors"): [("buildings", "floors", i) for i in range(8)],
+    }
+    result = balanced_sample(bank, rng=random.Random(11))
+    counts = Counter(row[0] for row in result)
+    transport_families = Counter(row[1] for row in result if row[0] == "transport")
+    assert len(result) == 20
+    assert counts == {"transport": 5, "prices": 5, "layouts": 5, "buildings": 5}
+    assert set(transport_families) == {"school", "kindergarten", "metro"}
+    assert sum(transport_families.values()) == 5
+    assert max(transport_families.values()) - min(transport_families.values()) <= 1
 
 
 def test_sampling_and_order_vary_between_attempts():
@@ -62,4 +81,4 @@ def test_explicit_admin_quotas_and_limits_are_respected():
     )
     assert effective_limit(5, 10) == 5
     assert effective_limit(None, 12) == 12
-    assert len(balanced_sample(bank, limit=1000)) == 20
+    assert len(balanced_sample(bank, limit=1000)) == 15

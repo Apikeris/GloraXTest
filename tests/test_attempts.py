@@ -313,7 +313,7 @@ def test_large_bank_balanced_persisted_sample_and_shuffled_options(app, client, 
             "infrastructure": 4,
         }
         attempt = db.session.get(Attempt, first_id)
-        assert attempt.settings["selection_policy"] == "balanced_categories_v1"
+        assert attempt.settings["selection_policy"] == "balanced_categories_v2_capped"
         assert attempt.settings["selected_categories"] == dict(
             Counter(item.snapshot["category"] for item in first)
         )

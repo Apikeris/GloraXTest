@@ -297,6 +297,8 @@ def normalize_project(row, detail=None, fetched_at=None):
             "квартиры": ("layouts", "apartment_count"),
             "количество секций": ("buildings", "section_count"),
             "площадь благоустройства": ("amenities", "landscaping_area"),
+            "площадь террас": ("layouts", "terrace_area"),
+            "площадь патио": ("layouts", "patio_area"),
         }
         for param in params if isinstance(params, list) else []:
             label = clean_text(param.get("description"))
@@ -338,8 +340,14 @@ def normalize_project(row, detail=None, fetched_at=None):
             "мест в школе": ("infrastructure", "school_places", "мест", "integer"),
             "мест в 2 детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
             "мест в детских садах": ("infrastructure", "kindergarten_places", "мест", "integer"),
+            "м² площадь патио": ("layouts", "patio_area", "м²", "decimal"),
+            "м² площадь террас": ("layouts", "terrace_area", "м²", "decimal"),
         }
-        emitted = {f["key"] for f in facts if f["key"] in {"section_count", "landscaping_area"}}
+        emitted = {
+            f["key"]
+            for f in facts
+            if f["key"] in {"section_count", "landscaping_area", "terrace_area", "patio_area"}
+        }
         for metric in (detail.get("aboutProject") or {}).get("statistics") or []:
             label = clean_text(metric.get("description"))
             title = clean_text(metric.get("title"))
@@ -366,8 +374,36 @@ def normalize_project(row, detail=None, fetched_at=None):
                     value_type=value_type,
                     unit=unit,
                     verified=bool(value),
-                    conditions={"basis": "project_page_metric"},
+                    conditions={
+                        "basis": "published_upper_bound"
+                        if re.search(r"\bдо\b", title, re.I)
+                        else "project_page_metric"
+                    },
                     missing_reason="Число не удалось однозначно извлечь" if not value else None,
+                )
+            )
+        # Some detailed pages expose useful capacity only in a project-scoped
+        # structured section, rather than in the shared statistics list.
+        parking_text = clean_text((detail.get("parkingAndStorage") or {}).get("description"))
+        parking_match = re.search(
+            r"(?:паркинг|парковк\w*)[^.]{0,120}?(\d+(?:[\s\u00a0]\d{3})*)\s*машино[- ]мест",
+            parking_text or "",
+            re.I,
+        )
+        if parking_match and not any(f["key"] == "parking_spaces" for f in facts):
+            facts.append(
+                make_fact(
+                    "parking",
+                    "parking_spaces",
+                    parking_match.group(1).replace(" ", "").replace("\u00a0", ""),
+                    url,
+                    {
+                        "parkingAndStorage": detail["parkingAndStorage"],
+                        "matched_text": parking_match.group(0),
+                    },
+                    value_type="integer",
+                    unit="мест",
+                    conditions={"basis": "explicit_project_parking_capacity"},
                 )
             )
         # A visible range is two independent facts; never infer area bounds

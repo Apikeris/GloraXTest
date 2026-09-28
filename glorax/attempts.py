@@ -27,6 +27,8 @@ from .facts import get_setting, latest_dataset
 from .models import (
     Attempt,
     AttemptItem,
+    Fact,
+    FactRevision,
     Participant,
     Project,
     QuestionRevision,
@@ -63,11 +65,48 @@ def _apply_question_settings(project, questions, shuffle=True):
             db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids))
         )
     }
+    fact_revision_ids = {
+        revision.target_fact_revision_id
+        for revision in revisions.values()
+        if revision.target_fact_revision_id
+    }
+    fact_revisions = (
+        {
+            revision.id: revision
+            for revision in db.session.scalars(
+                db.select(FactRevision).where(FactRevision.id.in_(fact_revision_ids))
+            )
+        }
+        if fact_revision_ids
+        else {}
+    )
+    fact_ids = {revision.fact_id for revision in fact_revisions.values()}
+    facts = (
+        {fact.id: fact for fact in db.session.scalars(db.select(Fact).where(Fact.id.in_(fact_ids)))}
+        if fact_ids
+        else {}
+    )
     buckets = {}
     for question in questions:
         revision = revisions.get(question.current_revision_id)
         if revision:
-            buckets.setdefault(revision.category, []).append(question)
+            fact_revision = fact_revisions.get(revision.target_fact_revision_id)
+            fact = facts.get(fact_revision.fact_id) if fact_revision else None
+            scope = (fact.scope or {}) if fact else {}
+            conditions = fact_revision.conditions or {} if fact_revision else {}
+            family = [fact.key if fact else revision.category]
+            if revision.category == "transport":
+                family.extend(
+                    (
+                        conditions.get("map_category_type"),
+                        conditions.get("mode") or conditions.get("transport_mode"),
+                    )
+                )
+            elif revision.category in {"prices", "layouts"}:
+                family.extend((scope.get("property_type"), scope.get("rooms")))
+            elif revision.category == "infrastructure":
+                family.append(conditions.get("category_type"))
+            buckets.setdefault((revision.category, tuple(family)), []).append(question)
     limit = test_question_limit(project.question_limit, get_setting("question_limit", None))
     return balanced_sample(buckets, limit, project.topic_distribution, rng=rng, shuffle=shuffle)
 
@@ -288,7 +327,7 @@ def start_test():
             "question_limit": test_question_limit(
                 project.question_limit, get_setting("question_limit")
             ),
-            "selection_policy": "balanced_categories_v1",
+            "selection_policy": "balanced_categories_v2_capped",
             "topic_distribution": project.topic_distribution,
             "selected_categories": {},
             "show_review": bool(get_setting("show_review", False)),

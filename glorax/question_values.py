@@ -67,6 +67,8 @@ TEMPLATES = {
     "kindergarten_places": "На сколько мест рассчитан детский сад проекта «{project}»{scope}{conditions}?",
     "courtyard_area": "Какова площадь двора проекта «{project}»{scope}{conditions}?",
     "park_area": "Какова площадь парка проекта «{project}»{scope}{conditions}?",
+    "terrace_area": "Какова заявленная площадь террас проекта «{project}»{scope}{conditions}?",
+    "patio_area": "Какова заявленная площадь патио проекта «{project}»{scope}{conditions}?",
     "distance": "Какое расстояние указано для проекта «{project}»{scope}{conditions}?",
     "travel_time": "Какое время в пути до объекта на карте указано для проекта «{project}»{conditions}?",
     "nearest_transport_station": "Какой транспортный объект указан в каталоге для проекта «{project}»{scope}{conditions}?",
