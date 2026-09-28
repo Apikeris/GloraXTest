@@ -45,3 +45,19 @@ def test_fact_edit_and_prompt_import_render(app,client,seeded):
     assert response.status_code==200 and 'Скопировать промпт'.encode() in response.data
     response=client.post('/admin/import',data={'action':'preview','payload':'{"schema_version":"wrong"}'})
     assert response.status_code==200 and b'JSON Schema' in response.data
+
+
+def test_admin_cannot_set_more_than_twenty_questions(app, client, seeded):
+    from glorax.facts import get_setting
+    login_session(app, client)
+    response = client.post('/admin/settings', data={'question_limit': '80', 'price_valid_days': '7',
+        'fact_valid_days': '180', 'inactivity_minutes': '60'})
+    assert response.status_code == 200
+    assert '1–20'.encode() in response.data
+    with app.app_context():
+        assert get_setting('question_limit') is None
+    response = client.post(f"/admin/projects/{seeded['project_ids'][0]}",
+                           data={'question_limit': '80', 'enabled': 'on', 'topic_distribution': '{}'})
+    assert response.status_code == 200
+    with app.app_context():
+        assert db.session.get(Project, seeded['project_ids'][0]).question_limit is None

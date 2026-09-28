@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from .extensions import db
 from .models import Project, Participant, Attempt, AttemptItem, QuestionRevision, uid, utcnow, aware
 from .facts import get_setting, latest_dataset
+from .selection import allowed_category_counts, balanced_sample, test_question_limit
 
 bp=Blueprint('public',__name__)
 rng=random.SystemRandom()
@@ -27,19 +28,19 @@ def session_hash():
 
 
 def _apply_question_settings(project, questions, shuffle=True):
-    questions = list(questions)
-    if shuffle: rng.shuffle(questions)
-    distribution = project.topic_distribution or {}
-    if distribution:
-        buckets = {key: [] for key in distribution}
-        for question in questions:
-            revision = db.session.get(QuestionRevision, question.current_revision_id)
-            if revision and revision.category in buckets:
-                buckets[revision.category].append(question)
-        questions = [question for key, items in buckets.items() for question in items[:max(0, int(distribution[key]))]]
-        if shuffle: rng.shuffle(questions)
-    limit = project.question_limit or get_setting('question_limit', None)
-    return questions[:int(limit)] if limit else questions
+    questions = list({question.id: question for question in questions}.values())
+    if not questions:
+        return []
+    revision_ids = [question.current_revision_id for question in questions]
+    revisions = {revision.id: revision for revision in db.session.scalars(
+        db.select(QuestionRevision).where(QuestionRevision.id.in_(revision_ids)))}
+    buckets = {}
+    for question in questions:
+        revision = revisions.get(question.current_revision_id)
+        if revision:
+            buckets.setdefault(revision.category, []).append(question)
+    limit = test_question_limit(project.question_limit, get_setting('question_limit', None))
+    return balanced_sample(buckets, limit, project.topic_distribution, rng=rng, shuffle=shuffle)
 
 
 def select_questions(project, shuffle=True):
@@ -94,13 +95,9 @@ def available_question_counts(projects):
     result = {project.id: 0 for project in projects if project}
     for project in enabled:
         categories = by_project.get(project.id, {})
-        distribution = project.topic_distribution or {}
-        if distribution:
-            count = sum(min(categories.get(key, 0), max(0, int(limit))) for key, limit in distribution.items())
-        else:
-            count = sum(categories.values())
-        limit = project.question_limit or fallback_limit
-        result[project.id] = min(count, int(limit)) if limit else count
+        count = sum(allowed_category_counts(categories, project.topic_distribution).values())
+        limit = test_question_limit(project.question_limit, fallback_limit)
+        result[project.id] = min(count, limit)
     return result
 
 
@@ -194,10 +191,12 @@ def start_test():
     if not participant:
         participant=Participant(name=name,employee_code_hash=code_hash);db.session.add(participant);db.session.flush()
     dataset=latest_dataset()
-    attempt=Attempt(participant_id=participant.id,full_name=name,project_id=project.id,project_name=project.name,session_hash=session_hash(),dataset_id=dataset.id if dataset else None,total=len(questions),settings={'seconds_per_question':20,'question_limit':project.question_limit or get_setting('question_limit'),'topic_distribution':project.topic_distribution,'show_review':bool(get_setting('show_review',False))})
+    attempt=Attempt(participant_id=participant.id,full_name=name,project_id=project.id,project_name=project.name,session_hash=session_hash(),dataset_id=dataset.id if dataset else None,total=len(questions),settings={'seconds_per_question':20,'question_limit':test_question_limit(project.question_limit, get_setting('question_limit')),'selection_policy':'balanced_categories_v1','topic_distribution':project.topic_distribution,'selected_categories':{},'show_review':bool(get_setting('show_review',False))})
     db.session.add(attempt);db.session.flush()
+    selected_categories = {}
     for position,q in enumerate(questions,1):
         revision=db.session.get(QuestionRevision,q.current_revision_id)
+        selected_categories[revision.category] = selected_categories.get(revision.category, 0) + 1
         options=[];correct=None
         for option in revision.options:
             opaque=uid()
@@ -206,6 +205,7 @@ def start_test():
         rng.shuffle(options)
         snapshot={'text':revision.text,'category':revision.category,'options':options,'correct_option_id':correct,'explanation':revision.explanation,'dataset_id':revision.dataset_id,'target_fact_revision_id':revision.target_fact_revision_id,'question_id':q.id,'origin':q.origin}
         db.session.add(AttemptItem(attempt_id=attempt.id,position=position,question_revision_id=revision.id,snapshot=snapshot))
+    attempt.settings = {**attempt.settings, 'selected_categories': selected_categories}
     db.session.commit()
     return redirect(url_for('public.test_page',attempt_id=attempt.id))
 

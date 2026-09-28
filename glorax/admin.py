@@ -206,7 +206,7 @@ def project_detail(project_id):
     project = db.get_or_404(Project, project_id)
     if request.method == 'POST':
         try:
-            limit = integer(request.form.get('question_limit'), minimum=1, maximum=1000)
+            limit = integer(request.form.get('question_limit'), minimum=1, maximum=20)
             distribution = json.loads(request.form.get('topic_distribution') or '{}')
             if not isinstance(distribution, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0 for k, v in distribution.items()):
                 raise ValueError('Распределение: JSON-объект «категория»: целое число вопросов ≥ 0')
@@ -222,7 +222,8 @@ def project_detail(project_id):
             flash(str(exc), 'error')
     facts = db.session.query(Fact, FactRevision).outerjoin(FactRevision, Fact.current_revision_id == FactRevision.id).filter(Fact.project_id == project.id).order_by(Fact.category, Fact.key).all()
     sources = Source.query.filter_by(project_id=project.id).order_by(Source.fetched_at.desc()).limit(40).all()
-    return render_template('admin_project_detail.html', project=project, facts=facts, sources=sources)
+    return render_template('admin_project_detail.html', project=project, facts=facts, sources=sources,
+                           displayed_question_limit=min(project.question_limit, 20) if project.question_limit else '')
 
 
 @bp.route('/projects/<project_id>/facts/new', methods=['GET', 'POST'])
@@ -412,7 +413,7 @@ def question_status(question_id):
 @bp.route('/settings', methods=['GET', 'POST'])
 def settings():
     from .facts import get_setting, set_setting
-    defaults = {'show_review': False, 'price_valid_days': 7, 'fact_valid_days': 180, 'inactivity_minutes': 60, 'question_limit': None}
+    defaults = {'show_review': False, 'price_valid_days': 7, 'fact_valid_days': 180, 'inactivity_minutes': 60, 'question_limit': 20}
     if request.method == 'POST':
         try:
             values = {'show_review': request.form.get('show_review') == 'on'}
@@ -420,7 +421,7 @@ def settings():
                 values[key] = integer(request.form.get(key), minimum=1, maximum=3650)
                 if values[key] is None:
                     raise ValueError('Заполните все сроки актуальности и бездействия')
-            values['question_limit'] = integer(request.form.get('question_limit'), minimum=1, maximum=1000)
+            values['question_limit'] = integer(request.form.get('question_limit'), minimum=1, maximum=20)
             for key, value in values.items():
                 set_setting(key, value)
             audit('settings.update', detail=values)
@@ -430,7 +431,10 @@ def settings():
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), 'error')
-    return render_template('admin_settings.html', values={k: get_setting(k, v) for k, v in defaults.items()})
+    from .selection import test_question_limit
+    values = {k: get_setting(k, v) for k, v in defaults.items()}
+    values['question_limit'] = test_question_limit(default_limit=values['question_limit'])
+    return render_template('admin_settings.html', values=values)
 
 
 @bp.get('/jobs')

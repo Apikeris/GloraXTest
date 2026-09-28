@@ -39,7 +39,7 @@ def test_queue_health_and_safe_database_error(app):
         row=db.session.get(Setting,'worker_queue_heartbeat')
         row.value=(utcnow()-timedelta(minutes=2)).isoformat();db.session.commit()
         job=enqueue_refresh()
-        assert 'start_render.py' in worker_diagnostics(job)['message']
+        assert 'Нет свежего сигнала worker.' in worker_diagnostics(job)['message']
     class DriverError(Exception):
         sqlstate='53300'
     exc=OperationalError('SQL with secret',{'password':'do-not-show'},DriverError('secret driver text'))

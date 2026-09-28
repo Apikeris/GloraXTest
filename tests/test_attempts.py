@@ -126,3 +126,78 @@ def test_catalogue_counts_use_published_facts_and_apply_settings(app,seeded):
         project.question_limit=1
         db.session.commit()
         assert available_question_counts([project]) == {project.id: 1}
+
+
+def test_large_bank_balanced_persisted_sample_and_shuffled_options(app, client, monkeypatch):
+    from collections import Counter
+    import random
+    from tests.conftest import collection
+    from glorax.facts import publish_collection
+    payload = collection()
+    monkeypatch.setattr('glorax.attempts.rng', random.Random(12345))
+    for index, project in enumerate(payload['projects']):
+        project['facts'] = []
+        for category, key, size, unit in [('transport', 'travel_time', 80, 'min'),
+                                          ('layouts', 'min_area', 8, 'm2'),
+                                          ('buildings', 'building_count', 8, None),
+                                          ('parking', 'parking_spaces', 8, None),
+                                          ('infrastructure', 'school_places', 8, None)]:
+            for number in range(size):
+                fact = dict(category=category, key=key, value=number + 1 + index * 100,
+                            value_type='integer', unit=unit,
+                            scope={'level': 'building', 'name': f'Корпус {number + 1}'},
+                            source_url=project['canonical_url'], evidence=f'Подтверждение {number}',
+                            method='test_fixture', verification_status='verified', is_exclusive=True)
+                if category == 'transport':
+                    fact['conditions'] = {'destination': f'Объект {number + 1}', 'mode': 'car'}
+                project['facts'].append(fact)
+    with app.app_context():
+        publish_collection(payload)
+        db.session.commit()
+        project = Project.query.order_by(Project.key).first()
+        project_id = project.id
+        assert Question.query.filter_by(project_id=project_id, status='published').count() > 80
+        assert available_question_counts([project]) == {project.id: 20}
+        # A previously stored oversized setting cannot defeat the hard cap.
+        project.question_limit = 80
+        db.session.commit()
+    first_id = start(client, project_id)
+    first_question = current(client, first_id)
+    assert client.get(f'/test/{first_id}').status_code == 200
+    restored_question = current(client, first_id)
+    assert {k: v for k, v in restored_question.items() if k != 'server_now'} == {
+        k: v for k, v in first_question.items() if k != 'server_now'}
+    second_id = start(client, project_id)
+    with app.app_context():
+        first = AttemptItem.query.filter_by(attempt_id=first_id).order_by(AttemptItem.position).all()
+        second = AttemptItem.query.filter_by(attempt_id=second_id).order_by(AttemptItem.position).all()
+        assert len(first) == len(second) == 20
+        assert len({item.question_revision_id for item in first}) == 20
+        assert Counter(item.snapshot['category'] for item in first) == {
+            'transport': 4, 'layouts': 4, 'buildings': 4, 'parking': 4, 'infrastructure': 4}
+        attempt = db.session.get(Attempt, first_id)
+        assert attempt.settings['selection_policy'] == 'balanced_categories_v1'
+        assert attempt.settings['selected_categories'] == dict(Counter(item.snapshot['category'] for item in first))
+        assert {item.question_revision_id for item in first} != {item.question_revision_id for item in second}
+        assert {option['id'] for item in first for option in item.snapshot['options']}.isdisjoint(
+            option['id'] for item in second for option in item.snapshot['options'])
+        correct_positions = set()
+        for item in first + second:
+            assert len(item.snapshot['options']) == 4
+            assert item.snapshot['correct_option_id'] in {option['id'] for option in item.snapshot['options']}
+            correct_positions.add(next(index for index, option in enumerate(item.snapshot['options'])
+                                      if option['id'] == item.snapshot['correct_option_id']))
+        assert correct_positions == {0, 1, 2, 3}
+
+
+def test_old_attempt_keeps_size_when_limits_change(app, client, seeded):
+    aid = start(client, seeded['project_ids'][0])
+    with app.app_context():
+        project = db.session.get(Project, seeded['project_ids'][0])
+        project.question_limit = 1
+        db.session.commit()
+    new_id = start(client, seeded['project_ids'][0])
+    with app.app_context():
+        assert db.session.get(Attempt, aid).total == 2
+        assert AttemptItem.query.filter_by(attempt_id=aid).count() == 2
+        assert db.session.get(Attempt, new_id).total == 1
