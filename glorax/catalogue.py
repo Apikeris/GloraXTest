@@ -2,6 +2,7 @@
 
 from .extensions import db
 from .models import QuestionRevision, utcnow
+from .question_policy import area_policy_clause
 from .selection import allowed_category_counts, test_question_limit
 from .settings import get_setting
 
@@ -32,6 +33,7 @@ def available_question_counts(projects):
         .where(
             Question.project_id.in_(project_ids),
             Question.status == "published",
+            area_policy_clause(Fact, FactRevision),
             or_(Question.origin == "generated", QuestionRevision.semantic_reviewed.is_(True)),
             Fact.current_revision_id == FactRevision.id,
             Fact.review_pending.is_(False),

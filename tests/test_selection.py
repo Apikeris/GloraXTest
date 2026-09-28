@@ -14,7 +14,10 @@ def test_large_transport_bank_does_not_crowd_out_other_topics():
     for seed in range(30):
         result = balanced_sample(bank, rng=random.Random(seed))
         assert len(result) == len(set(result)) == 20
-        assert Counter(category for category, _ in result) == {category: 4 for category in bank}
+        counts = Counter(category for category, _ in result)
+        assert counts["prices"] == 3
+        assert max(counts.values()) <= 5
+        assert set(counts) == set(bank)
 
 
 def test_scarce_categories_are_included_but_no_category_exceeds_five():
@@ -48,8 +51,8 @@ def test_family_sampling_spreads_transport_across_map_categories():
     result = balanced_sample(bank, rng=random.Random(11))
     counts = Counter(row[0] for row in result)
     transport_families = Counter(row[1] for row in result if row[0] == "transport")
-    assert len(result) == 20
-    assert counts == {"transport": 5, "prices": 5, "layouts": 5, "buildings": 5}
+    assert len(result) == 18
+    assert counts == {"transport": 5, "prices": 3, "layouts": 5, "buildings": 5}
     assert set(transport_families) == {"school", "kindergarten", "metro"}
     assert sum(transport_families.values()) == 5
     assert max(transport_families.values()) - min(transport_families.values()) <= 1
@@ -62,7 +65,7 @@ def test_sampling_and_order_vary_between_attempts():
     assert set(first) != set(second)
     assert first != second
     counts = Counter(category for category, _ in first)
-    assert max(counts.values()) - min(counts.values()) <= 1
+    assert counts == {"transport": 5, "prices": 3, "layouts": 5}
 
 
 def test_more_categories_than_seats_randomizes_category_ties():
@@ -81,4 +84,10 @@ def test_explicit_admin_quotas_and_limits_are_respected():
     )
     assert effective_limit(5, 10) == 5
     assert effective_limit(None, 12) == 12
-    assert len(balanced_sample(bank, limit=1000)) == 15
+    assert len(balanced_sample(bank, limit=1000)) == 13
+
+
+def test_price_cap_applies_even_to_explicit_admin_quotas():
+    bank = pools({"prices": 80, "layouts": 80})
+    result = balanced_sample(bank, distribution={"prices": 20, "layouts": 20})
+    assert Counter(category for category, _ in result) == {"prices": 3, "layouts": 5}

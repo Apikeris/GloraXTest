@@ -525,3 +525,38 @@ def test_http_redirect_checks_host_and_robots(monkeypatch):
     Response.headers = {"Location": "/forbidden"}
     with pytest.raises(SourceError, match="robots"):
         client.get("https://glorax.com/projects")
+
+
+def test_formats_are_catalogue_scoped_and_minimum_is_not_studio_maximum():
+    row = {
+        "id": 20,
+        "projectSlug": "formats",
+        "projectName": "Форматы",
+        "flatType": [
+            {"typeSlug": "flat", "type": "2", "square": 50},
+            {"typeSlug": "flat", "type": "0", "square": 21},
+            {"typeSlug": "flat", "type": "0", "square": 22},
+            {"typeSlug": "apartment", "type": "1", "square": 30},
+        ],
+    }
+    result = normalize_project(row, {"mainLotType": "flat"})
+    facts = {f["key"]: f for f in result["facts"]}
+    assert facts["apartment_formats"]["value"] == "студии, 2-комнатные"
+    assert facts["apartment_formats"]["conditions"]["basis"] == "catalogue_room_formats"
+    assert facts["studio_max_area"]["value"] is None
+    assert facts["studio_max_area"]["missing_reason"]
+    detail = {
+        "mainLotType": "flat",
+        "planningSolutions": {"description": "Студии площадью от 21 до 34,5 м²"},
+    }
+    studio = next(
+        f for f in normalize_project(row, detail)["facts"] if f["key"] == "studio_max_area"
+    )
+    assert studio["value"] == "34.5"
+    assert studio["scope"]["rooms"] == "0"
+    assert studio["verification_status"] == "verified"
+    detail["aboutProject"] = {"description": "Студии от 22 до 35 м²"}
+    conflict = next(
+        f for f in normalize_project(row, detail)["facts"] if f["key"] == "studio_max_area"
+    )
+    assert conflict["value"] is None

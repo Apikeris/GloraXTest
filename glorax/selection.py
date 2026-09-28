@@ -4,6 +4,7 @@ import random
 
 MAX_TEST_QUESTIONS = 20
 MAX_QUESTIONS_PER_CATEGORY = 5
+CATEGORY_LIMITS = {"prices": 3}
 
 
 def test_question_limit(project_limit=None, default_limit=None):
@@ -18,11 +19,14 @@ def allowed_category_counts(counts, distribution=None):
             category: min(
                 counts.get(category, 0),
                 max(0, int(quota)),
-                MAX_QUESTIONS_PER_CATEGORY,
+                CATEGORY_LIMITS.get(category, MAX_QUESTIONS_PER_CATEGORY),
             )
             for category, quota in distribution.items()
         }
-    return {category: min(count, MAX_QUESTIONS_PER_CATEGORY) for category, count in counts.items()}
+    return {
+        category: min(count, CATEGORY_LIMITS.get(category, MAX_QUESTIONS_PER_CATEGORY))
+        for category, count in counts.items()
+    }
 
 
 def balanced_sample(buckets, limit=MAX_TEST_QUESTIONS, distribution=None, rng=None, shuffle=True):

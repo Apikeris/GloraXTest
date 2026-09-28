@@ -19,6 +19,7 @@ from .models import (
     uid,
     utcnow,
 )
+from .question_policy import area_policy_error
 from .question_values import (
     CATEGORIES,
     DIFFICULTIES,
@@ -242,6 +243,9 @@ def validate_revision(revision, require_current=True, semantic_review=False):
         errors.append("Целевой факт принадлежит другому проекту")
     if revision.category != _fact(target).category:
         errors.append("Категория вопроса не совпадает с целевым фактом")
+    policy_error = area_policy_error(_fact(target), target)
+    if policy_error:
+        errors.append(policy_error)
     options = revision.options or []
     ids = [option.get("id") for option in options]
     if len(ids) != len(set(ids)) or any(not option_id for option_id in ids):
@@ -460,6 +464,9 @@ def generate_questions(dataset_id):
             if question:
                 question.generation_key = key
         reasons = freshness_errors(target) + price_errors(target)
+        policy_error = area_policy_error(fact, target)
+        if policy_error:
+            reasons.append(policy_error)
         if (
             not target.is_exclusive
             or (

@@ -718,6 +718,78 @@ def _append_landing_facts(detail, slug, url, facts, coverage, status):
     return facts, status
 
 
+def _append_apartment_formats(row, fetched_at, facts):
+    labels = {
+        "0": "студии",
+        "1": "1-комнатные",
+        "2": "2-комнатные",
+        "3": "3-комнатные",
+        "4": "4+ комнатные",
+    }
+    rows = [item for item in row.get("flatType") or [] if item.get("typeSlug") == "flat"]
+    rooms = {str(item.get("type")) for item in rows}
+    known = bool(rooms) and rooms <= labels.keys()
+    facts.append(
+        make_fact(
+            "layouts",
+            "apartment_formats",
+            ", ".join(labels[key] for key in labels if key in rooms) if known else None,
+            CATALOG_URL,
+            {"projectSlug": row["projectSlug"], "flatType": rows},
+            scope={"level": "property_type", "property_type": "flat"},
+            conditions={"basis": "catalogue_room_formats", "observed_on": fetched_at[:10]},
+            valid_days=7,
+            missing_reason=None
+            if known
+            else "Каталог не публикует распознаваемый список форматов квартир",
+        )
+    )
+
+
+def _append_studio_maximum(row, detail, url, facts):
+    # A catalogue 'square' is a minimum, never a studio maximum. Only explicit
+    # studio-specific ranges in project content can establish this upper bound.
+    sections = [detail.get("aboutProject"), detail.get("planningSolutions")]
+    text = " — ".join(_rich_text(section) for section in sections if section)
+    for param in (detail.get("aboutProject") or {}).get("projectParams") or []:
+        if (
+            isinstance(param, dict)
+            and "студи" in (clean_text(param.get("description")) or "").casefold()
+        ):
+            text += " — Студии " + (clean_text(param.get("title")) or "")
+    matches = list(
+        re.finditer(
+            r"студии\s+(?:площадью\s+)?(?:от\s+)?\d+(?:[,.]\d+)?\s*(?:до|[-–—])\s*(\d+(?:[,.]\d+)?)\s*м[²2]",
+            text,
+            re.I,
+        )
+    )
+    property_types = {item.get("typeSlug") for item in row.get("flatType") or []}
+    property_type = detail.get("mainLotType")
+    if property_type not in {"flat", "apartment"}:
+        property_type = next(iter(property_types)) if len(property_types) == 1 else None
+    values = {decimal_text(match.group(1).replace(",", ".")) for match in matches}
+    value = (
+        next(iter(values)) if len(values) == 1 and property_type in {"flat", "apartment"} else None
+    )
+    facts.append(
+        make_fact(
+            "layouts",
+            "studio_max_area",
+            value,
+            url,
+            {"studio_ranges": [match.group(0) for match in matches]},
+            value_type="decimal",
+            unit="м²",
+            scope={"level": "property_type", "property_type": property_type, "rooms": "0"},
+            conditions={"basis": "published_range"},
+            missing_reason=None
+            if value
+            else "Нет однозначного опубликованного диапазона площади студий",
+        )
+    )
+
+
 def normalize_project(row, detail=None, fetched_at=None):
     fetched_at = fetched_at or utcnow()
     slug = row["projectSlug"]
@@ -943,8 +1015,10 @@ def normalize_project(row, detail=None, fetched_at=None):
             "Условия применения промо к цене требуют проверки",
         ],
     }
+    _append_apartment_formats(row, fetched_at, facts)
     if detail:
         _append_detail_facts(detail, slug, url, price, facts, coverage)
+        _append_studio_maximum(row, detail, url, facts)
     facts, status = _append_landing_facts(detail, slug, url, facts, coverage, status)
     # API gives technical dates while public cards show quarters. Preserve raw
     # date as a candidate; publish only the quarter, avoiding false day precision.

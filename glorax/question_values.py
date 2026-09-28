@@ -47,6 +47,8 @@ TEMPLATES = {
     "handover_date": "Какой срок передачи ключей указан для проекта «{project}»{scope}{date}?",
     "min_area": "Какова минимальная площадь в проекте «{project}»{scope}{conditions}?",
     "advertised_min_area": "Какая минимальная площадь заявлена для проекта «{project}»{scope}{conditions}?",
+    "studio_max_area": "Какова максимальная заявленная площадь студий в проекте «{project}»?",
+    "apartment_formats": "Какие форматы квартир по комнатности представлены в каталоге проекта «{project}»{date}?",
     "max_area": "Какова максимальная площадь в проекте «{project}»{scope}{conditions}?",
     "min_floors": "Какова минимальная этажность проекта «{project}»{scope}?",
     "max_floors": "Какова максимальная этажность проекта «{project}»{scope}?",

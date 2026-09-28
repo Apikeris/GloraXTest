@@ -239,7 +239,7 @@ def test_large_bank_balanced_persisted_sample_and_shuffled_options(app, client, 
         project["facts"] = []
         for category, key, size, unit in [
             ("transport", "travel_time", 80, "min"),
-            ("layouts", "min_area", 8, "m2"),
+            ("layouts", "ceiling_height", 8, "m"),
             ("buildings", "building_count", 8, None),
             ("parking", "parking_spaces", 8, None),
             ("infrastructure", "school_places", 8, None),
@@ -313,7 +313,7 @@ def test_large_bank_balanced_persisted_sample_and_shuffled_options(app, client, 
             "infrastructure": 4,
         }
         attempt = db.session.get(Attempt, first_id)
-        assert attempt.settings["selection_policy"] == "balanced_categories_v2_capped"
+        assert attempt.settings["selection_policy"] == "balanced_categories_v3_prices3_studio_area"
         assert attempt.settings["selected_categories"] == dict(
             Counter(item.snapshot["category"] for item in first)
         )

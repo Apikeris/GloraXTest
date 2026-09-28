@@ -327,7 +327,7 @@ def start_test():
             "question_limit": test_question_limit(
                 project.question_limit, get_setting("question_limit")
             ),
-            "selection_policy": "balanced_categories_v2_capped",
+            "selection_policy": "balanced_categories_v3_prices3_studio_area",
             "topic_distribution": project.topic_distribution,
             "selected_categories": {},
             "show_review": bool(get_setting("show_review", False)),
