@@ -1,5 +1,3 @@
-"""Read-only SQLite import, backup before touching destination, no guessed history."""
-
 import hashlib
 import json
 import sqlite3
@@ -50,7 +48,7 @@ def import_legacy(path, backup_dir):
         db.select(LegacyRecord).where(LegacyRecord.source_hash == source_hash)
     ).first():
         return {"already_imported": True, "backup": str(backup), "source_hash": source_hash}
-    # A source SHA identifies the complete import. All records + mapping commit together.
+
     ds = Dataset(
         status="legacy_unverified",
         report={

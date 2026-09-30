@@ -1,1 +1,30 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import pagination with context %}{% block heading %}Журнал действий{% endblock %}{% block admin_content %}<div class="card table-wrap"><table><tr><th>Время</th><th>Автор</th><th>Действие</th><th>Подробности</th></tr>{% for a in page.items %}<tr><td>{{ a.created_at|admin_date }}</td><td>{{ admins.get(a.admin_id,'Система') }}</td><td>{{ a.action }}<br>{{ a.entity_id or '' }}</td><td><pre>{{ a.detail|tojson(indent=2) }}</pre></td></tr>{% endfor %}</table></div>{{ pagination(page) }}{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import pagination with context %}
+{% block heading %}Журнал действий{% endblock %}
+{% block admin_content %}
+    <div class="card table-wrap">
+        <table>
+            <tr>
+                <th>Время</th>
+                <th>Автор</th>
+                <th>Действие</th>
+                <th>Подробности</th>
+            </tr>
+            {% for a in page.items %}
+                <tr>
+                    <td>{{ a.created_at|admin_date }}</td>
+                    <td>{{ admins.get(a.admin_id,'Система') }}</td>
+                    <td>
+                        {{ a.action }}
+                        <br>
+                        {{ a.entity_id or '' }}
+                    </td>
+                    <td>
+                        <pre>{{ a.detail|tojson(indent=2) }}</pre>
+                    </td>
+                </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {{ pagination(page) }}
+{% endblock %}

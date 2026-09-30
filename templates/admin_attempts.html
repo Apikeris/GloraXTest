@@ -1,7 +1,93 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import pagination, attempt_table with context %}
-{% block heading %}Попытки сотрудников{% endblock %}{% block title %}Попытки · GloraX{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import pagination, attempt_table with context %}
+{% block heading %}Попытки сотрудников{% endblock %}
+{% block title %}Попытки · GloraX{% endblock %}
 {% block admin_content %}
-<form method="get" class="card grid filters"><label>ФИО<input name="name" value="{{ request.args.get('name','') }}" placeholder="Часть имени"></label><label>ID участника<input name="participant_id" value="{{ request.args.get('participant_id','') }}"></label><label>Проект<select name="project_id"><option value="">Все</option>{% for p in projects %}<option value="{{ p.id }}" {% if request.args.get('project_id')==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><label>Статус<select name="status"><option value="">Все</option>{% for key,label in attempt_statuses.items() %}<option value="{{ key }}" {% if request.args.get('status')==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><label>С даты<input type="date" name="date_from" value="{{ request.args.get('date_from','') }}"></label><label>По дату<input type="date" name="date_to" value="{{ request.args.get('date_to','') }}"></label><label>Результат от, %<input type="number" name="min_result" min="0" max="100" value="{{ request.args.get('min_result','') }}"></label><label>Результат до, %<input type="number" name="max_result" min="0" max="100" value="{{ request.args.get('max_result','') }}"></label><label>Сортировка<select name="sort">{% for key,label in [('newest','Сначала новые'),('oldest','Сначала старые'),('name','По ФИО'),('score_desc','Высокий результат'),('score_asc','Низкий результат')] %}<option value="{{ key }}" {% if request.args.get('sort')==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><div class="actions"><button class="btn">Найти</button><a href="{{ url_for('admin.attempts') }}">Сбросить</a></div></form>
-<p>Найдено: {{ page.total }} · <a href="{{ url_for('admin.attempts_csv', **request.args.to_dict()) }}">Выгрузить отфильтрованные результаты CSV</a></p>
-<div class="card">{{ attempt_table(page.items) }}{{ pagination(page) }}</div>
+    <form method="get" class="card grid filters">
+        <label>
+            ФИО
+            <input name="name"
+                   value="{{ request.args.get('name', '') }}"
+                   placeholder="Часть имени">
+        </label>
+        <label>
+            ID участника
+            <input name="participant_id"
+                   value="{{ request.args.get('participant_id', '') }}">
+        </label>
+        <label>
+            Проект
+            <select name="project_id">
+                <option value="">Все</option>
+                {% for p in projects %}
+                    <option value="{{ p.id }}"
+                            {% if request.args.get('project_id')==p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Статус
+            <select name="status">
+                <option value="">Все</option>
+                {% for key,label in attempt_statuses.items() %}
+                    <option value="{{ key }}"
+                            {% if request.args.get('status')==key %}selected{% endif %}>
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            С даты
+            <input type="date"
+                   name="date_from"
+                   value="{{ request.args.get('date_from', '') }}">
+        </label>
+        <label>
+            По дату
+            <input type="date"
+                   name="date_to"
+                   value="{{ request.args.get('date_to', '') }}">
+        </label>
+        <label>
+            Результат от, %
+            <input type="number"
+                   name="min_result"
+                   min="0"
+                   max="100"
+                   value="{{ request.args.get('min_result', '') }}">
+        </label>
+        <label>
+            Результат до, %
+            <input type="number"
+                   name="max_result"
+                   min="0"
+                   max="100"
+                   value="{{ request.args.get('max_result', '') }}">
+        </label>
+        <label>
+            Сортировка
+            <select name="sort">
+                {% for key,label in [('newest','Сначала новые'),('oldest','Сначала старые'),('name','По ФИО'),('score_desc','Высокий результат'),('score_asc','Низкий результат')] %}
+                    <option value="{{ key }}"
+                            {% if request.args.get('sort')==key %}selected{% endif %}>
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <div class="actions">
+            <button class="btn">Найти</button>
+            <a href="{{ url_for('admin.attempts') }}">Сбросить</a>
+        </div>
+    </form>
+    <p>
+        Найдено: {{ page.total }} · <a href="{{ url_for('admin.attempts_csv', **request.args.to_dict()) }}">Выгрузить отфильтрованные результаты CSV</a>
+    </p>
+    <div class="card">
+        {{ attempt_table(page.items) }}
+        {{ pagination(page) }}
+    </div>
 {% endblock %}

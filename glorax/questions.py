@@ -1,5 +1,3 @@
-"""Validation and generation of questions backed by versioned evidence."""
-
 from __future__ import annotations
 
 import hashlib
@@ -92,7 +90,6 @@ def _fact(revision):
 
 
 def _context(revision):
-    """Only like-for-like measurements; source/sample metadata do not change units."""
     fact = _fact(revision)
     scope = fact.scope or {}
     conditions = revision.conditions or {}
@@ -413,7 +410,6 @@ def revision_data(target, distractors, project, dataset_id):
 
 
 def generate_questions(dataset_id):
-    """Stage revisions in the caller's transaction; the publisher commits once."""
     dataset = db.session.get(Dataset, dataset_id)
     if not dataset:
         raise ValueError("Снимок датасета не найден")
@@ -559,9 +555,7 @@ def generate_questions(dataset_id):
         question_heads[question.id] = (question, revision.id)
         pending_question_revisions[question.id] = revision
         question.status, question.review_reason = "published", None
-    # Existing manual/import questions are never rewritten after a source changes.
-    # Keep pointers at old revisions until all new question revisions exist; the
-    # PostgreSQL current-revision FK is intentionally not deferred.
+
     db.session.flush()
     for question, revision_id in question_heads.values():
         question.current_revision_id = revision_id
@@ -580,12 +574,6 @@ def generate_questions(dataset_id):
 
 
 def _preload_question_validation(questions, project_ids=()):
-    """Load all relations needed by ``validate_revision`` in bounded queries.
-
-    This is used for the public catalogue as well as an individual test start.
-    Validation remains the single eligibility decision; this helper only avoids
-    turning one catalogue page into a network round-trip per project.
-    """
     revision_ids = {
         question.current_revision_id for question in questions if question.current_revision_id
     }
@@ -638,16 +626,13 @@ def _preload_question_validation(questions, project_ids=()):
         ):
             grouped[row.dataset_id].add(row.revision_id)
         cache.update(grouped)
-    # SQLAlchemy's identity map holds weak references. Keep these objects alive
-    # throughout validation, otherwise every Session.get below fetches the same
-    # facts/projects again over the network despite this batch preload.
+
     return {
         revision.id: revision for revision in question_revisions
     }, fact_revisions + facts + projects
 
 
 def eligible_questions_for_projects(projects):
-    """Return eligible published questions for several projects in one batch."""
     by_id = {project.id: project for project in projects if project and project.enabled}
     result = {project.id: [] for project in projects if project}
     if not by_id:

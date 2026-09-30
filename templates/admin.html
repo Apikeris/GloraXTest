@@ -1,8 +1,51 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf, attempt_table with context %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf, attempt_table with context %}
 {% block title %}Обзор · GloraX{% endblock %}
 {% block admin_content %}
-<div class="grid stats">{% for name,label in [('projects','Проекты'),('participants','Участники'),('attempts','Попытки'),('published','Опубликованные вопросы'),('review','Ожидают проверки')] %}<div class="card"><strong class="stat">{{ counts[name] }}</strong><span>{{ label }}</span></div>{% endfor %}</div>
-<section class="card"><h2>Актуальность данных</h2>{% if dataset %}<p>Последний опубликованный снимок: <code>{{ dataset.id }}</code><br>Дата: {{ dataset.published_at|admin_date }}. Возраст данных отдельных фактов может отличаться.</p><details><summary>Отчёт покрытия и качества</summary><pre>{{ dataset.report|tojson(indent=2) }}</pre></details>{% else %}<p>Подтверждённый датасет ещё не опубликован. Старые сведения не используются в новых тестах.</p>{% endif %}<form method="post" action="{{ url_for('admin.refresh') }}">{{ csrf() }}<button class="btn">Обновить данные</button> <a class="btn secondary" href="{{ url_for('admin.dataset_export') }}">Экспорт датасета JSON</a></form></section>
-<section class="card"><h2>Последние обновления</h2>{% for job in jobs %}<p><a href="{{ url_for('admin.job_detail', job_id=job.id) }}">{{ job.created_at|admin_date }}</a> · {{ job.stage }} · {{ job.state }} · {{ job.progress }}/{{ job.total }}</p>{% else %}<p>Заданий пока нет. Запустите обновление и отдельный worker.</p>{% endfor %}</section>
-<section class="card"><h2>Последние попытки</h2>{{ attempt_table(recent) }}</section>
+    <div class="grid stats">
+        {% for name,label in [('projects','Проекты'),('participants','Участники'),('attempts','Попытки'),('published','Опубликованные вопросы'),('review','Ожидают проверки')] %}
+            <div class="card">
+                <strong class="stat">{{ counts[name] }}</strong>
+                <span>{{ label }}</span>
+            </div>
+        {% endfor %}
+    </div>
+    <section class="card">
+        <h2>Актуальность данных</h2>
+        {% if dataset %}
+            <p>
+                Последний опубликованный снимок: <code>
+                {{ dataset.id }}
+                </code>
+                <br>
+                Дата: {{ dataset.published_at|admin_date }}. Возраст данных отдельных фактов может отличаться.
+            </p>
+            <details>
+                <summary>Отчёт покрытия и качества</summary>
+                <pre>{{ dataset.report|tojson(indent=2) }}</pre>
+            </details>
+        {% else %}
+            <p>Подтверждённый датасет ещё не опубликован. Старые сведения не используются в новых тестах.</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('admin.refresh') }}">
+            {{ csrf() }}
+            <button class="btn">Обновить данные</button>
+            <a class="btn secondary"
+               href="{{ url_for('admin.dataset_export') }}">Экспорт датасета JSON</a>
+        </form>
+    </section>
+    <section class="card">
+        <h2>Последние обновления</h2>
+        {% for job in jobs %}
+            <p>
+                <a href="{{ url_for('admin.job_detail', job_id=job.id) }}">{{ job.created_at|admin_date }}</a> · {{ job.stage }} · {{ job.state }} · {{ job.progress }}/{{ job.total }}
+            </p>
+        {% else %}
+            <p>Заданий пока нет.</p>
+        {% endfor %}
+    </section>
+    <section class="card">
+        <h2>Последние попытки</h2>
+        {{ attempt_table(recent) }}
+    </section>
 {% endblock %}

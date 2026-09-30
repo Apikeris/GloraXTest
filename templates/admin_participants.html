@@ -1,3 +1,53 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import pagination with context %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import pagination with context %}
 {% block heading %}Участники{% endblock %}
-{% block admin_content %}<p>Совпадение ФИО не объединяет участников. Повторные попытки связываются только по необязательному коду сотрудника.</p><form class="card grid" method="get"><label>ФИО<input name="name" value="{{ request.args.get('name','') }}"></label><label>ID участника<input name="participant_id" value="{{ request.args.get('participant_id','') }}"></label><button class="btn">Найти</button></form><div class="card table-wrap"><table><thead><tr><th>ФИО</th><th>ID участника</th><th>Код сотрудника</th><th>Попытки</th><th>Создан</th></tr></thead><tbody>{% for p in page.items %}<tr><td>{{ p.name }}</td><td><code>{{ p.id }}</code></td><td>{{ 'Привязан (хранится хеш)' if p.employee_code_hash else 'Не указан' }}</td><td><a href="{{ url_for('admin.attempts', participant_id=p.id) }}">{{ counts.get(p.id, 0) }}</a></td><td>{{ p.created_at|admin_date }}</td></tr>{% else %}<tr><td colspan="5">Участники не найдены</td></tr>{% endfor %}</tbody></table>{{ pagination(page) }}</div>{% endblock %}
+{% block admin_content %}
+    <p>Совпадение ФИО не объединяет участников. Повторные попытки связываются только по необязательному коду сотрудника.</p>
+    <form class="card grid" method="get">
+        <label>
+            ФИО
+            <input name="name" value="{{ request.args.get('name', '') }}">
+        </label>
+        <label>
+            ID участника
+            <input name="participant_id"
+                   value="{{ request.args.get('participant_id', '') }}">
+        </label>
+        <button class="btn">Найти</button>
+    </form>
+    <div class="card table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>ID участника</th>
+                    <th>Код сотрудника</th>
+                    <th>Попытки</th>
+                    <th>Создан</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in page.items %}
+                    <tr>
+                        <td>{{ p.name }}</td>
+                        <td>
+                            <code>
+                                {{ p.id }}
+                            </code>
+                        </td>
+                        <td>{{ 'Привязан (хранится хеш)' if p.employee_code_hash else 'Не указан' }}</td>
+                        <td>
+                            <a href="{{ url_for('admin.attempts', participant_id=p.id) }}">{{ counts.get(p.id, 0) }}</a>
+                        </td>
+                        <td>{{ p.created_at|admin_date }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5">Участники не найдены</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {{ pagination(page) }}
+    </div>
+{% endblock %}

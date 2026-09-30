@@ -1,5 +1,3 @@
-"""Administrative reports; registered on the shared protected blueprint."""
-
 import csv
 import io
 from datetime import datetime, timedelta
@@ -215,7 +213,7 @@ def attempt_detail(attempt_id):
 
 @bp.get("/analytics")
 def analytics():
-    # Snapshot categories are read from immutable attempt items, not the current question bank.
+
     project_rows = (
         db.session.query(
             Attempt.project_name,

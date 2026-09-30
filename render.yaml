@@ -1,16 +1,9 @@
-# Render Free: web and worker subprocesses share the free service lifecycle.
-# Existing services: set Start Command manually; YAML does not update them automatically.
 services:
   - type: web
     name: glorax-knowledge-web
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # Keep scraping out of this free web instance: the worker can starve HTTP
-    # health checks while a long refresh is running.
-    # HEAD / is database-free; bounded DB timeouts and gthread keep health checks
-    # responsive when Aiven stalls. The launcher applies migrations first and
-    # supervises the durable scraper queue only after HTTP is listening.
     startCommand: python scripts/start_render.py
     healthCheckPath: /healthz
     autoDeployTrigger: 'off'

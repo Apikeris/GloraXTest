@@ -1,1 +1,32 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf with context %}{% block heading %}Задание обновления{% endblock %}{% block admin_content %}<section class="card" id="job-status" data-url="{{ url_for('admin.job_status',job_id=job.id) }}" data-state="{{ job.state }}"><p>ID {{ job.id }}</p><h2 id="job-stage">{{ job.stage }}</h2><p id="job-progress">{{ job.progress }} / {{ job.total }} · {{ job.state|ru_status }}</p><p id="job-detail">{{ job.detail or '' }}</p><p id="worker-message">{{ worker.message }}</p><p>Последний сигнал задания: <span id="job-heartbeat">{{ job.heartbeat_at|admin_date }}</span></p><p id="job-error" class="error">{{ job.error or '' }}</p><p>Создано: {{ job.created_at|admin_date }} · Начало: {{ job.started_at|admin_date }} · Окончание: {{ job.finished_at|admin_date }} · Запусков: {{ job.attempts }}</p>{% if job.state=='failed' %}<form method="post" action="{{ url_for('admin.retry_job',job_id=job.id) }}">{{ csrf() }}<button>Повторить сбор</button></form>{% endif %}<details open><summary>Отчёт: покрытие, изменения, конфликты и пропуски</summary><pre id="job-report">{{ job.report|tojson(indent=2) }}</pre></details></section>{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf with context %}
+{% block heading %}Задание обновления{% endblock %}
+{% block admin_content %}
+    <section class="card"
+             id="job-status"
+             data-url="{{ url_for('admin.job_status',job_id=job.id) }}"
+             data-state="{{ job.state }}">
+        <p>ID {{ job.id }}</p>
+        <h2 id="job-stage">{{ job.stage }}</h2>
+        <p id="job-progress">{{ job.progress }} / {{ job.total }} · {{ job.state|ru_status }}</p>
+        <p id="job-detail">{{ job.detail or '' }}</p>
+        <p id="worker-message">{{ worker.message }}</p>
+        <p>
+            Последний сигнал задания: <span id="job-heartbeat">{{ job.heartbeat_at|admin_date }}</span>
+        </p>
+        <p id="job-error" class="error">{{ job.error or '' }}</p>
+        <p>
+            Создано: {{ job.created_at|admin_date }} · Начало: {{ job.started_at|admin_date }} · Окончание: {{ job.finished_at|admin_date }} · Запусков: {{ job.attempts }}
+        </p>
+        {% if job.state=="failed" %}
+            <form method="post" action="{{ url_for('admin.retry_job',job_id=job.id) }}">
+                {{ csrf() }}
+                <button>Повторить сбор</button>
+            </form>
+        {% endif %}
+        <details open>
+            <summary>Отчёт: покрытие, изменения, конфликты и пропуски</summary>
+            <pre id="job-report">{{ job.report|tojson(indent=2) }}</pre>
+        </details>
+    </section>
+{% endblock %}

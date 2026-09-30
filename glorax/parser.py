@@ -1,5 +1,3 @@
-"""Collector orchestration and backwards-compatible public parser API."""
-
 from __future__ import annotations
 
 import argparse
@@ -236,7 +234,7 @@ def _collect_projects(client, progress, started):
             for fact in project["facts"]:
                 if fact["source_url"] == url:
                     fact["source_url"] = final_url
-        # Keep original scoped catalog row; all values have exact source evidence.
+
         sources.insert(
             0,
             {
@@ -263,8 +261,7 @@ def _collect_projects(client, progress, started):
             "catalog_complete": complete,
         }
     )
-    # A detail failure is a partial collection: caller must retain the prior
-    # published snapshot, rather than stamp old detail data with a new date.
+
     successful = complete and coverage["detail_success"] == len(projects)
     progress(
         "normalization",
@@ -284,7 +281,7 @@ def _collect_projects(client, progress, started):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Живая проверка официального каталога GloraX")
-    parser.add_argument("--output", help="JSON с материалами и фактами (без данных сотрудников)")
+    parser.add_argument("--output")
     args = parser.parse_args()
     result = scrape()
     if args.output:

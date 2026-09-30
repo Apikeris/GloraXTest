@@ -1,5 +1,3 @@
-"""Gunicorn master hooks for the durable queue on one Render Free service."""
-
 import os
 import signal
 import subprocess
@@ -93,7 +91,6 @@ supervisor = WorkerSupervisor()
 
 
 def when_ready(server):
-    """Run in the Gunicorn master after its listening socket is ready."""
     supervisor.start()
 
 

@@ -1,5 +1,3 @@
-"""Bounded, category-balanced sampling of the published question bank."""
-
 import random
 
 MAX_TEST_QUESTIONS = 20
@@ -13,7 +11,6 @@ def test_question_limit(project_limit=None, default_limit=None):
 
 
 def allowed_category_counts(counts, distribution=None):
-    """Apply the per-topic ceiling as well as any explicit project quota."""
     if distribution:
         return {
             category: min(
@@ -30,13 +27,6 @@ def allowed_category_counts(counts, distribution=None):
 
 
 def balanced_sample(buckets, limit=MAX_TEST_QUESTIONS, distribution=None, rng=None, shuffle=True):
-    """Select across categories and fact families without overfilling a topic.
-
-    Bucket keys may be a category or ``(category, family)``. Sampling rotates
-    among families (for example, among school/metro/park transport facts), then
-    among categories. A project with too few eligible categories produces a
-    shorter quiz instead of allowing a single subject to exceed the hard cap.
-    """
     rng = rng or random.SystemRandom()
     grouped = {}
     for key, items in buckets.items():

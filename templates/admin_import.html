@@ -1,1 +1,69 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf with context %}{% block heading %}Импорт вопросов из JSON{% endblock %}{% block admin_content %}{% for e in errors %}<p class="notice error">{{ e }}</p>{% endfor %}{% if report %}<div class="notice">Добавлено: {{ report.created }} · Обновлено: {{ report.updated }} · Без изменений: {{ report.unchanged }}</div>{% endif %}<form method="post" enctype="multipart/form-data" class="card">{{ csrf() }}<input type="hidden" name="action" value="preview"><label>Файл JSON до 1 МиБ<input type="file" name="file" accept=".json,application/json"></label><label>Или вставьте JSON<textarea name="payload" rows="12">{{ payload|tojson(indent=2) if payload else '' }}</textarea></label><button>Проверить и показать предпросмотр</button></form>{% if preview %}{% for e in preview.errors %}<p class="notice error">{{ e.path }}: {{ e.message }}</p>{% endfor %}<form method="post">{{ csrf() }}<input type="hidden" name="action" value="commit"><textarea name="payload" hidden>{{ payload|tojson }}</textarea>{% for entry in preview.questions %}<section class="card"><label><input type="checkbox" name="selected" value="{{ entry.external_id }}" {% if not entry.valid %}disabled{% endif %}> {{ entry.external_id }} · {{ {'create':'Новый','unchanged':'Уже импортирован','conflict':'Конфликт: содержимое изменено'}.get(entry.action,entry.action) }}</label>{% for e in entry.errors %}<p class="error">{{ e.path }}: {{ e.message }}</p>{% endfor %}{% if entry.preview %}<h3>{{ entry.preview.text }}</h3><ol>{% for o in entry.preview.options %}<li>{{ o.text }} {% if o.id==entry.preview.correct_option_id %}— правильный{% endif %}</li>{% endfor %}</ol><p>{{ entry.preview.explanation }}</p>{% endif %}</section>{% endfor %}<label><input type="checkbox" name="allow_updates"> Явно разрешаю обновить выбранные конфликты новыми версиями</label><p class="muted">Структурная проверка не подтверждает смысл текста. Все новые вопросы сохраняются черновиками.</p><button>Импортировать выбранные валидные вопросы</button></form>{% endif %}{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf with context %}
+{% block heading %}Импорт вопросов из JSON{% endblock %}
+{% block admin_content %}
+    {% for e in errors %}
+        <p class="notice error">{{ e }}</p>
+    {% endfor %}
+    {% if report %}
+        <div class="notice">
+            Добавлено: {{ report.created }} · Обновлено: {{ report.updated }} · Без изменений: {{ report.unchanged }}
+        </div>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data" class="card">
+        {{ csrf() }}
+        <input type="hidden" name="action" value="preview">
+        <label>
+            Файл JSON до 1 МиБ
+            <input type="file" name="file" accept=".json,application/json">
+        </label>
+        <label>
+            Или вставьте JSON
+            <textarea name="payload"
+                      rows="12">{{ payload|tojson(indent=2) if payload else '' }}</textarea>
+        </label>
+        <button>Проверить и показать предпросмотр</button>
+    </form>
+    {% if preview %}
+        {% for e in preview.errors %}
+            <p class="notice error">{{ e.path }}: {{ e.message }}</p>
+        {% endfor %}
+        <form method="post">
+            {{ csrf() }}
+            <input type="hidden" name="action" value="commit">
+            <textarea name="payload" hidden>{{ payload|tojson }}</textarea>
+            {% for entry in preview.questions %}
+                <section class="card">
+                    <label>
+                        <input type="checkbox"
+                               name="selected"
+                               value="{{ entry.external_id }}"
+                               {% if not entry.valid %}disabled{% endif %}>
+                        {{ entry.external_id }} · {{ {'create':'Новый','unchanged':'Уже импортирован','conflict':'Конфликт: содержимое изменено'}.get(entry.action,entry.action) }}
+                    </label>
+                    {% for e in entry.errors %}
+                        <p class="error">{{ e.path }}: {{ e.message }}</p>
+                    {% endfor %}
+                    {% if entry.preview %}
+                        <h3>{{ entry.preview.text }}</h3>
+                        <ol>
+                            {% for o in entry.preview.options %}
+                                <li>
+                                    {{ o.text }}
+                                    {% if o.id==entry.preview.correct_option_id %}— правильный{% endif %}
+                                </li>
+                            {% endfor %}
+                        </ol>
+                        <p>{{ entry.preview.explanation }}</p>
+                    {% endif %}
+                </section>
+            {% endfor %}
+            <label>
+                <input type="checkbox" name="allow_updates">
+                Явно разрешаю обновить выбранные конфликты новыми версиями
+            </label>
+            <p class="muted">Структурная проверка не подтверждает смысл текста. Все новые вопросы сохраняются черновиками.</p>
+            <button>Импортировать выбранные валидные вопросы</button>
+        </form>
+    {% endif %}
+{% endblock %}

@@ -1,5 +1,3 @@
-"""Export a bounded evidence packet and validate AI/manual JSON before persistence."""
-
 from __future__ import annotations
 
 import json
@@ -78,9 +76,7 @@ def parse_payload(payload):
                 ),
             )
         except (json.JSONDecodeError, RecursionError) as exc:
-            raise ValueError(
-                "Некорректный JSON: проверьте синтаксис и глубину вложенности"
-            ) from exc
+            raise ValueError("Некорректный JSON") from exc
     try:
         serialized = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError, RecursionError) as exc:
@@ -153,7 +149,7 @@ def export_prompt(project_id, count=10, themes=None, difficulty="basic"):
         except ValueError:
             continue
         eligible.append(revision)
-    # Only a real validated combination can become the UI's example.
+
     example = None
     for target in eligible:
         if db.session.get(Fact, target.fact_id).project_id != project.id or not target.is_exclusive:
@@ -267,8 +263,7 @@ def preview_import(payload):
         )
     if not isinstance(payload.get("questions"), list):
         return result
-    # Only structurally valid rows may contribute SQL lookup keys. Retain the
-    # context throughout semantic validation to avoid weak-identity-map reloads.
+
     valid_items = [
         item
         for index, item in enumerate(payload["questions"][:100])
@@ -423,7 +418,6 @@ def preview_import(payload):
 
 
 def commit_import(payload, selected_external_ids, allow_updates=False, author_id=None):
-    """Revalidate after preview and import selected rows atomically, under row locks."""
     preview = preview_import(payload)
     if preview["errors"]:
         raise ValueError(
@@ -434,7 +428,7 @@ def commit_import(payload, selected_external_ids, allow_updates=False, author_id
     if not selected or len(entries) != len(selected):
         raise ValueError("Выберите существующие уникальные вопросы из предпросмотра")
     if any(not item["valid"] for item in entries):
-        raise ValueError("Среди выбранных вопросов есть ошибки; исправьте их до записи")
+        raise ValueError("Среди выбранных вопросов есть ошибки")
     if any(item["action"] == "conflict" for item in entries) and not allow_updates:
         raise ValueError("Конфликт external_id: обновление требует отдельного явного действия")
     report = {"created": 0, "updated": 0, "unchanged": 0}

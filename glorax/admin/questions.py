@@ -1,5 +1,3 @@
-"""Administrative questions; registered on the shared protected blueprint."""
-
 import hashlib
 import json
 
@@ -77,7 +75,7 @@ def question_edit(question_id=None):
     errors = []
     if request.method == "POST":
         if not dataset:
-            errors = ["Нет опубликованного снимка данных. Сначала загрузите и проверьте факты"]
+            errors = ["Нет опубликованного снимка данных"]
         else:
             try:
                 project_id = question.project_id if question else request.form.get("project_id")
@@ -150,16 +148,14 @@ def question_edit(question_id=None):
                     audit("question.edit", question.id, {"revision_id": new.id})
                     db.session.commit()
                     flash(
-                        "Новая версия сохранена как черновик. Проверьте предпросмотр перед публикацией",
+                        "Новая версия сохранена как черновик",
                         "success",
                     )
                     return redirect(url_for("admin.question_edit", question_id=question.id))
             except (ValueError, IntegrityError) as exc:
                 db.session.rollback()
                 errors = [
-                    str(exc)
-                    if not isinstance(exc, IntegrityError)
-                    else "Конфликт сохранения. Обновите страницу"
+                    str(exc) if not isinstance(exc, IntegrityError) else "Конфликт сохранения"
                 ]
     return render_template(
         "admin_question_edit.html",

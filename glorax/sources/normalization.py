@@ -1,5 +1,3 @@
-"""Source normalization. External content is always treated as data."""
-
 from __future__ import annotations
 
 import hashlib
@@ -62,7 +60,6 @@ def make_fact(
 
 
 def _rich_text(value):
-    """Read human-authored copy from nested CMS blocks, including HTML bodies."""
     parts = []
     for node in walk_dicts(value):
         for field in ("title", "description", "descriptionFull", "subtitle", "text", "html"):
@@ -155,8 +152,7 @@ def _append_project_metrics(detail, url, facts):
                     },
                 )
             )
-    # The detailed project page publishes concise, project-scoped scalar
-    # metrics. These are safe to quiz as their literal stated values.
+
     aliases = {
         "площадь участка": ("overview", "land_area", "га", "decimal"),
         "количество очередей строительства": (
@@ -232,8 +228,7 @@ def _append_project_metrics(detail, url, facts):
                 missing_reason="Число не удалось однозначно извлечь" if not value else None,
             )
         )
-    # Some detailed pages expose useful capacity only in a project-scoped
-    # structured section, rather than in the shared statistics list.
+
     parking_text = clean_text((detail.get("parkingAndStorage") or {}).get("description"))
     parking_match = re.search(
         r"(?:паркинг|парковк\w*)[^.]{0,120}?(\d+(?:[\s\u00a0]\d{3})*)\s*машино[- ]мест",
@@ -747,8 +742,7 @@ def _append_apartment_formats(row, fetched_at, facts):
 
 
 def _append_studio_maximum(row, detail, url, facts):
-    # A catalogue 'square' is a minimum, never a studio maximum. Only explicit
-    # studio-specific ranges in project content can establish this upper bound.
+
     sections = [detail.get("aboutProject"), detail.get("planningSolutions")]
     text = " — ".join(_rich_text(section) for section in sections if section)
     for param in (detail.get("aboutProject") or {}).get("projectParams") or []:
@@ -878,8 +872,7 @@ def normalize_project(row, detail=None, fetched_at=None):
         "collection_started_at": fetched_at,
         "collection_finished_at": fetched_at,
     }
-    # The catalog is a marketing minimum. Promo applicability is not defined;
-    # exact amount and property type are retained, but never auto-published.
+
     facts.append(
         make_fact(
             "prices",
@@ -935,8 +928,7 @@ def normalize_project(row, detail=None, fetched_at=None):
                 conditions={"basis": "advertised_minimum", "observed_on": fetched_at[:10]},
             )
         )
-        # The catalogue's per-room `price` is a published starting price, not
-        # a maximum or a complete sample. Keep it separate by room type.
+
         room_price = decimal_text(flat_type.get("price")) if not row.get("hidePriceFlg") else None
         room_conditions = {
             "currency": "RUB",
@@ -1020,8 +1012,7 @@ def normalize_project(row, detail=None, fetched_at=None):
         _append_detail_facts(detail, slug, url, price, facts, coverage)
         _append_studio_maximum(row, detail, url, facts)
     facts, status = _append_landing_facts(detail, slug, url, facts, coverage, status)
-    # API gives technical dates while public cards show quarters. Preserve raw
-    # date as a candidate; publish only the quarter, avoiding false day precision.
+
     quarterly = []
     for fact in facts:
         if fact["key"] == "completion_date" and isinstance(fact["value"], str):
@@ -1078,12 +1069,6 @@ def collect_offer_range(
     started_at=None,
     finished_at=None,
 ):
-    """Aggregate a caller-proven homogeneous sample, never an advertised 'from'.
-
-    This reusable validator is deliberately not wired to an invented API. The
-    live source currently does not supply a permitted complete offer crawl.
-    Every record must identify price basis, currency, type and payment terms.
-    """
     selected, seen = [], set()
     rejected = []
     for offer in offers:

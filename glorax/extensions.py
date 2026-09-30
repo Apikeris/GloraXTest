@@ -9,10 +9,6 @@ migrate = Migrate()
 csrf = CSRFProtect()
 
 
-# A rollback must not leave uncommitted settings visible to later work in the
-# same worker session. Commit starts a fresh configuration view as well.
-
-
 @event.listens_for(Session, "after_commit")
 @event.listens_for(Session, "after_rollback")
 def clear_transaction_caches(session):

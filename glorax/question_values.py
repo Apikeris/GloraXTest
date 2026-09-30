@@ -1,5 +1,3 @@
-"""Pure question templates, labels, exact formatting and equivalence rules."""
-
 from __future__ import annotations
 
 import json
@@ -151,7 +149,6 @@ def _decimal(value):
 
 
 def canonical_display(value):
-    """Catch equivalent renderings, including 10 млн ₽ / 10 000 000 рублей."""
     text = normalize_text(value)
     span = re.fullmatch(
         r"(?:от\s*)?(\d+(?:[.,]\d+)?)\s*(?:-|до)\s*(\d+(?:[.,]\d+)?)\s*(?:этаж(?:ей|а)?|м2|м²|м|корпус(?:ов|а)?)?",
@@ -201,7 +198,6 @@ def canonical_value(revision):
 
 
 def format_value(revision):
-    """Never round values just to fit an option: rounded distractors can coincide."""
     if revision.value_type in {"decimal", "integer", "number", "money"}:
         value = _decimal(revision.value)
         amount = format(value, "f")

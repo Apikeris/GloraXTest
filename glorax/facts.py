@@ -1,5 +1,3 @@
-"""Evidence normalization, snapshots and explicit editorial overrides."""
-
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -20,8 +18,6 @@ from .models import (
     uid,
     utcnow,
 )
-
-# Stable imports for existing CLI extensions and callers.
 from .settings import get_setting as get_setting
 from .settings import set_setting as set_setting
 
@@ -145,10 +141,9 @@ def _invalidate_questions(changed_ids):
 
 
 def publish_collection(collection, job_guard=None):
-    """Caller owns transaction; a failed traversal cannot replace published data."""
     if not collection.get("complete") or not collection.get("projects"):
         raise ValueError("Обход каталога неполон: рабочий снимок сохранён.")
-    # PostgreSQL advisory lock serializes collectors and editors without external services.
+
     if db.engine.dialect.name == "postgresql":
         db.session.execute(db.text("SELECT pg_advisory_xact_lock(73192041)"))
     if job_guard:
@@ -215,8 +210,7 @@ def publish_collection(collection, job_guard=None):
             )
             db.session.add(source)
             sources[source.url] = source
-        # Revisions refer to source IDs immediately. Persist this project's
-        # small source batch before queueing its many fact revisions.
+
         if sources:
             db.session.flush()
         for candidate in data.get("facts", []):
@@ -279,8 +273,7 @@ def publish_collection(collection, job_guard=None):
             fact.review_pending = False
             members[fact.id] = r.id
             current_revisions[r.id] = r
-    # First persist fact/revision/source rows in batches, with the old fact heads
-    # still pointing at published versions. The head FK is intentionally immediate.
+
     db.session.flush()
     for fact, rid in fact_heads.values():
         fact.current_revision_id = rid

@@ -1,1 +1,10 @@
-{% extends 'admin_base.html' %}{% block heading %}Исходный материал{% endblock %}{% block admin_content %}<div class="card"><p>{{ source.url }}</p><p>{{ source.fetched_at|admin_date }} · {{ source.content_type }}</p><p>SHA-256: {{ source.checksum }} · Снимок: {{ source.dataset_id }}</p><pre>{{ source.content }}</pre></div>{% endblock %}
+{% extends "admin_base.html" %}
+{% block heading %}Исходный материал{% endblock %}
+{% block admin_content %}
+    <div class="card">
+        <p>{{ source.url }}</p>
+        <p>{{ source.fetched_at|admin_date }} · {{ source.content_type }}</p>
+        <p>SHA-256: {{ source.checksum }} · Снимок: {{ source.dataset_id }}</p>
+        <pre>{{ source.content }}</pre>
+    </div>
+{% endblock %}

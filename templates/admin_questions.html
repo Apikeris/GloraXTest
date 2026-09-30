@@ -1,1 +1,77 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import pagination with context %}{% block heading %}Банк вопросов{% endblock %}{% block admin_content %}<p><a class="btn" href="{{ url_for('admin.question_edit') }}">Создать вопрос</a></p><form class="filters"><label>Проект<select name="project_id"><option value="">Все</option>{% for p in projects %}<option value="{{ p.id }}" {% if request.args.get('project_id')==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><label>Статус<select name="status"><option value="">Все</option>{% for k,v in question_statuses.items() %}<option value="{{ k }}" {% if request.args.get('status')==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label><label>Тема<select name="category"><option value="">Все</option>{% for k,v in categories.items() %}<option value="{{ k }}" {% if request.args.get('category')==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label><label>Происхождение<select name="origin"><option value="">Все</option>{% for k,v in [('generated','Шаблон'),('manual','Ручной'),('ai_import','Импорт')] %}<option value="{{ k }}" {% if request.args.get('origin')==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label><label>Поиск<input name="q" value="{{ request.args.get('q','') }}"></label><button>Найти</button></form>{% for q,r,p in page.items %}<article class="card"><p class="muted">{{ p.name }} · {{ question_statuses[q.status] }} · {{ categories.get(r.category,r.category) if r else '' }}</p><h3><a href="{{ url_for('admin.question_edit',question_id=q.id) }}">{{ r.text if r else 'Нет версии' }}</a></h3>{% if q.review_reason %}<p>{{ q.review_reason }}</p>{% endif %}</article>{% else %}<p class="card">Вопросов нет. Проверьте отчёт генератора: для вопроса нужны четыре сопоставимых подтверждённых значения.</p>{% endfor %}{{ pagination(page) }}{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import pagination with context %}
+{% block heading %}Банк вопросов{% endblock %}
+{% block admin_content %}
+    <p>
+        <a class="btn" href="{{ url_for('admin.question_edit') }}">Создать вопрос</a>
+    </p>
+    <form class="filters">
+        <label>
+            Проект
+            <select name="project_id">
+                <option value="">Все</option>
+                {% for p in projects %}
+                    <option value="{{ p.id }}"
+                            {% if request.args.get('project_id')==p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Статус
+            <select name="status">
+                <option value="">Все</option>
+                {% for k,v in question_statuses.items() %}
+                    <option value="{{ k }}"
+                            {% if request.args.get('status')==k %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Тема
+            <select name="category">
+                <option value="">Все</option>
+                {% for k,v in categories.items() %}
+                    <option value="{{ k }}"
+                            {% if request.args.get('category')==k %}selected{% endif %}>
+                        {{ v }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Происхождение
+            <select name="origin">
+                <option value="">Все</option>
+                {% for k,v in [('generated','Шаблон'),('manual','Ручной'),('ai_import','Импорт')] %}
+                    <option value="{{ k }}"
+                            {% if request.args.get('origin')==k %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Поиск
+            <input name="q" value="{{ request.args.get('q', '') }}">
+        </label>
+        <button>Найти</button>
+    </form>
+    {% for q,r,p in page.items %}
+        <article class="card">
+            <p class="muted">
+                {{ p.name }} · {{ question_statuses[q.status] }} · {{ categories.get(r.category,r.category) if r else '' }}
+            </p>
+            <h3>
+                <a href="{{ url_for('admin.question_edit',question_id=q.id) }}">
+                    {{ r.text if r else 'Нет версии' }}
+                </a>
+            </h3>
+            {% if q.review_reason %}
+                <p>{{ q.review_reason }}</p>
+            {% endif %}
+        </article>
+    {% else %}
+        <p class="card">Вопросов пока нет.</p>
+    {% endfor %}
+    {{ pagination(page) }}
+{% endblock %}

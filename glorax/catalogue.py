@@ -1,5 +1,3 @@
-"""Fast publication-based counts for public and admin project catalogues."""
-
 from .extensions import db
 from .models import QuestionRevision, utcnow
 from .question_policy import area_policy_clause
@@ -8,14 +6,6 @@ from .settings import get_setting
 
 
 def available_question_counts(projects):
-    """Return quick catalogue counts from the publication-time validation.
-
-    Deep question validation is intentionally done when starting a test and
-    when publishing a dataset. Re-running it for every question across every
-    project made the public home page take down all four Gunicorn request
-    threads. Published questions are already validated; this grouped query
-    only excludes target facts that have since expired or been superseded.
-    """
     enabled = [project for project in projects if project and project.enabled]
     if not enabled:
         return {project.id: 0 for project in projects if project}

@@ -1,1 +1,58 @@
-{% extends 'base.html' %}{% block content %}<section class="quiz"><div class="eyebrow">РЕЗУЛЬТАТ СОХРАНЁН</div><h1>{{ attempt.status|ru_status }}</h1><p>{{ attempt.full_name }} · {{ attempt.project_name }}</p><div class="card"><div class="score">{{ result.percent }}<small>%</small></div><h2>{{ result.score }} из {{ result.total }} правильных</h2><div class="grid three"><div><strong>{{ result.errors }}</strong><p>Ошибок</p></div><div><strong>{{ result.timeouts }}</strong><p>Пропусков по времени</p></div><div><strong>{{ result.not_reached }}</strong><p>Не пройдено</p></div></div>{% if attempt.status=='interrupted' %}<p class="notice">Попытка прервана по бездействию. Процент рассчитан от всех назначенных вопросов.</p>{% endif %}</div><p class="muted">ID попытки: {{ attempt.id }}<br>ID участника: {{ attempt.participant_id }}</p>{% if items %}{% for item in items %}<div class="card"><h3>{{ item.position }}. {{ item.snapshot.text }}</h3><p>{{ item.outcome|ru_status }}</p><ul>{% for o in item.snapshot.options %}<li>{{ o.text }}{% if o.id==item.snapshot.correct_option_id %} — правильный{% endif %}{% if o.id==item.selected_option_id %} — ваш ответ{% endif %}</li>{% endfor %}</ul><p>{{ item.snapshot.explanation }}</p></div>{% endfor %}{% else %}<p>Подробный разбор доступен администратору.</p>{% endif %}<a class="btn" href="/">К проектам</a></section>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+    <section class="quiz">
+        <div class="eyebrow">РЕЗУЛЬТАТ СОХРАНЁН</div>
+        <h1>{{ attempt.status|ru_status }}</h1>
+        <p>{{ attempt.full_name }} · {{ attempt.project_name }}</p>
+        <div class="card">
+            <div class="score">
+                {{ result.percent }}
+                <small>%</small>
+            </div>
+            <h2>{{ result.score }} из {{ result.total }} правильных</h2>
+            <div class="grid three">
+                <div>
+                    <strong>{{ result.errors }}</strong>
+                    <p>Ошибок</p>
+                </div>
+                <div>
+                    <strong>{{ result.timeouts }}</strong>
+                    <p>Пропусков по времени</p>
+                </div>
+                <div>
+                    <strong>{{ result.not_reached }}</strong>
+                    <p>Не пройдено</p>
+                </div>
+            </div>
+            {% if attempt.status=="interrupted" %}
+                <p class="notice">Попытка прервана по бездействию. Процент рассчитан от всех назначенных вопросов.</p>
+            {% endif %}
+        </div>
+        <p class="muted">
+            ID попытки: {{ attempt.id }}
+            <br>
+            ID участника: {{ attempt.participant_id }}
+        </p>
+        {% if items %}
+            {% for item in items %}
+                <div class="card">
+                    <h3>{{ item.position }}. {{ item.snapshot.text }}</h3>
+                    <p>{{ item.outcome|ru_status }}</p>
+                    <ul>
+                        {% for o in item.snapshot.options %}
+                            <li>
+                                {{ o.text }}
+                                {% if o.id==item.snapshot.correct_option_id %}— правильный{% endif %}
+                                {% if o.id==item.selected_option_id %}— ваш ответ{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    <p>{{ item.snapshot.explanation }}</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>Подробный разбор доступен администратору.</p>
+        {% endif %}
+        <a class="btn" href="/">К проектам</a>
+    </section>
+{% endblock %}

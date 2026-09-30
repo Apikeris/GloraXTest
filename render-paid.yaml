@@ -1,4 +1,3 @@
-# Paid web + worker; Aiven is external, no Render database provisioned.
 services:
   - type: web
     name: glorax-knowledge-web

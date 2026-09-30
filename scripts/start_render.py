@@ -1,5 +1,3 @@
-"""Render Free entry point. Open the HTTP socket before touching PostgreSQL."""
-
 import os
 import sys
 from pathlib import Path
@@ -10,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     from dotenv import load_dotenv
 
-    load_dotenv(ROOT / ".env")  # Render environment values take precedence.
+    load_dotenv(ROOT / ".env")
     env = os.environ.copy()
     env.setdefault("DB_POOL_SIZE", "2")
     env.setdefault("DB_MAX_OVERFLOW", "0")
@@ -44,8 +42,7 @@ def main():
         "--error-logfile",
         "-",
     ]
-    # Database migrations run from the Gunicorn master hook after this server has
-    # bound its socket. A slow or unavailable database must never hide /healthz.
+
     os.execvpe(web_command[0], web_command, env)
 
 

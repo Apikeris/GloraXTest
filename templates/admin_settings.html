@@ -1,1 +1,51 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf with context %}{% block heading %}Настройки тестирования{% endblock %}{% block admin_content %}<form class="card" method="post">{{ csrf() }}<label>Максимум вопросов на попытку (пусто — 20)<input type="number" name="question_limit" min="1" max="20" value="{{ values.question_limit or '' }}"></label><label>Актуальность цен, дней<input type="number" name="price_valid_days" min="1" max="3650" required value="{{ values.price_valid_days }}"></label><label>Актуальность остальных фактов, дней<input type="number" name="fact_valid_days" min="1" max="3650" required value="{{ values.fact_valid_days }}"></label><p class="muted">Новые сроки применяются к новым версиям фактов. У старых версий остаются исходные сроки.</p><label>Прерывать попытку после бездействия, минут<input type="number" name="inactivity_minutes" min="1" max="3650" required value="{{ values.inactivity_minutes }}"></label><label><input type="checkbox" name="show_review" {% if values.show_review %}checked{% endif %}> Показывать сотруднику разбор после завершения (для новых попыток)</label><p>На попытку назначается не больше 20 случайных вопросов с равномерным распределением между доступными категориями. Если вопросов мало, тест будет короче. На каждый вопрос всегда выделяется 20 секунд по серверному времени.</p><button>Сохранить</button></form>{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf with context %}
+{% block heading %}Настройки тестирования{% endblock %}
+{% block admin_content %}
+    <form class="card" method="post">
+        {{ csrf() }}
+        <label>
+            Максимум вопросов на попытку (пусто — 20)
+            <input type="number"
+                   name="question_limit"
+                   min="1"
+                   max="20"
+                   value="{{ values.question_limit or '' }}">
+        </label>
+        <label>
+            Актуальность цен, дней
+            <input type="number"
+                   name="price_valid_days"
+                   min="1"
+                   max="3650"
+                   required
+                   value="{{ values.price_valid_days }}">
+        </label>
+        <label>
+            Актуальность остальных фактов, дней
+            <input type="number"
+                   name="fact_valid_days"
+                   min="1"
+                   max="3650"
+                   required
+                   value="{{ values.fact_valid_days }}">
+        </label>
+        <p class="muted">Новые сроки применяются к новым версиям фактов. У старых версий остаются исходные сроки.</p>
+        <label>
+            Прерывать попытку после бездействия, минут
+            <input type="number"
+                   name="inactivity_minutes"
+                   min="1"
+                   max="3650"
+                   required
+                   value="{{ values.inactivity_minutes }}">
+        </label>
+        <label>
+            <input type="checkbox"
+                   name="show_review"
+                   {% if values.show_review %}checked{% endif %}> Показывать сотруднику разбор после завершения (для новых попыток)
+        </label>
+        <p>На попытку назначается не больше 20 случайных вопросов с равномерным распределением между доступными категориями. Если вопросов мало, тест будет короче. На каждый вопрос всегда выделяется 20 секунд по серверному времени.</p>
+        <button>Сохранить</button>
+    </form>
+{% endblock %}

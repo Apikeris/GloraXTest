@@ -1,5 +1,3 @@
-"""Persistent identities and append-only evidence/history. All timestamps are UTC."""
-
 from datetime import datetime, timezone
 from uuid import uuid4
 

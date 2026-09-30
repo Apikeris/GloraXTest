@@ -1,1 +1,22 @@
-{% extends 'base.html' %}{% block content %}<section class="quiz card"><div class="eyebrow">АДМИНИСТРИРОВАНИЕ</div><h1>Вход</h1><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Логин<input name="username" required autocomplete="username" maxlength="100"></label><label>Пароль<input type="password" name="password" required autocomplete="current-password"></label><button class="btn">Войти</button></form></section>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+    <section class="quiz card">
+        <div class="eyebrow">АДМИНИСТРИРОВАНИЕ</div>
+        <h1>Вход</h1>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+                Логин
+                <input name="username" required autocomplete="username" maxlength="100">
+            </label>
+            <label>
+                Пароль
+                <input type="password"
+                       name="password"
+                       required
+                       autocomplete="current-password">
+            </label>
+            <button class="btn">Войти</button>
+        </form>
+    </section>
+{% endblock %}

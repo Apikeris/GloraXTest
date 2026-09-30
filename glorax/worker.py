@@ -1,5 +1,3 @@
-"""Render worker supervisor: queue and timeout maintenance in separate processes."""
-
 import argparse
 import multiprocessing
 import signal
@@ -45,9 +43,7 @@ def queue(stop, once=False, idle_poll_seconds=5, recovery_interval_seconds=30):
                 if job:
                     succeeded = run_job(*job)
                     if once and not succeeded:
-                        raise RuntimeError(
-                            "Задание завершилось ошибкой; проверьте сохранённый отчёт"
-                        )
+                        raise RuntimeError("Задание завершилось ошибкой")
                 if once:
                     sweep_expired()
                     break
@@ -69,15 +65,12 @@ def main():
     parser.add_argument(
         "--compact",
         action="store_true",
-        help="Queue and timer threads in a dedicated worker process (Render Free)",
     )
     args = parser.parse_args()
     if args.once:
         queue(threading.Event(), True)
         return
     if args.compact:
-        # These threads live only in the separately supervised worker executable,
-        # never in Gunicorn. PostgreSQL, not a Python thread, owns job state.
         stop = threading.Event()
         children = [
             threading.Thread(target=queue, args=(stop,), name="glorax-queue", daemon=True),
@@ -114,7 +107,7 @@ def main():
             for child in children:
                 child.join(timeout=2)
     if failed:
-        raise SystemExit(1)  # Render restarts supervisor; leases recover queued work.
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

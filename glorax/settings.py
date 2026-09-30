@@ -1,5 +1,3 @@
-"""Transaction-local configuration reads; explicit null remains distinct from absence."""
-
 from .extensions import db
 from .models import Setting
 

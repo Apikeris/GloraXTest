@@ -1,5 +1,3 @@
-"""Administrative common; registered on the shared protected blueprint."""
-
 from datetime import datetime
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo

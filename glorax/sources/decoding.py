@@ -1,5 +1,3 @@
-"""Source decoding. External content is always treated as data."""
-
 from __future__ import annotations
 
 import json
@@ -20,13 +18,7 @@ from .common import (
 
 
 def extract_flight(html):
-    """Decode JSON transport only, including UTF-8 length-delimited T records.
 
-    No JavaScript interpreter is used. Flight references can point at record
-    properties; resolve only data references, with bounded depth/cycle checks.
-    """
-    # Only script transport is needed; building the entire marketing-page DOM
-    # multiplies memory usage on a 512 MB web service.
     soup = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer("script"))
     decoder = json.JSONDecoder()
     chunks = []
@@ -74,7 +66,7 @@ def extract_flight(html):
             try:
                 records[key] = json.loads(data[pos:end])
             except (ValueError, UnicodeDecodeError):
-                pass  # I/HL import records are not application data.
+                pass
             pos = end + 1
 
     def resolve(value, seen=frozenset(), depth=0):
@@ -100,7 +92,6 @@ def extract_flight(html):
             return [resolve(v, seen, depth + 1) for v in value]
         return None if value == "$undefined" else value
 
-    # Resolve one record at a time instead of retaining every expanded React tree.
     return (resolve(value) for value in records.values())
 
 
@@ -130,7 +121,7 @@ def parse_catalog(html, url=CATALOG_URL):
         href = element.get("href") or element.get("data-next-page")
         if href:
             next_urls.append(urljoin(url, href))
-    # Explicit links from real payloads only; no guessed API or page parameter.
+
     for key in ("next", "nextPageUrl", "next_url"):
         if isinstance(catalog.get(key), str) and catalog[key]:
             next_urls.append(urljoin(url, catalog[key]))
@@ -162,14 +153,13 @@ def parse_detail(html, slug):
             f"Нет привязанного к проекту объекта logs.slug={slug}; меню не используется"
         )
     detail = max(candidates, key=lambda item: len(json.dumps(item, ensure_ascii=False)))
-    # These supplementary components are accepted only with an exact project slug.
+
     detail = dict(detail)
     detail["_finishing_components"] = [r for item in finishing_components for r in item["data"]]
     return detail
 
 
 def extract_pdf_text(content, *, max_pages=MAX_BOOKLET_PAGES, max_chars=MAX_BOOKLET_TEXT_CHARS):
-    """Extract a bounded text layer from a linked PDF; never OCR or trust it as verified facts."""
     if not content.startswith(b"%PDF-"):
         raise SourceError("Ссылка на буклет вернула не PDF")
     try:
@@ -199,11 +189,6 @@ def extract_pdf_text(content, *, max_pages=MAX_BOOKLET_PAGES, max_chars=MAX_BOOK
 
 
 def parse_landing(html, slug, final_url):
-    """Premium landing uses scoped project components instead of logs.slug.
-
-    A canonical URL plus exact projectSlug bind components to this project.
-    Generic h1/menu are deliberately excluded (live pages have a wrong h1).
-    """
     soup = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer(["link", "title", "h1"]))
     canonical = soup.select_one('link[rel="canonical"]')
     if not canonical or urlsplit(canonical.get("href", "")).path.rstrip("/") != urlsplit(
@@ -235,7 +220,6 @@ def parse_landing(html, slug, final_url):
 
 
 def document_url_and_size(document):
-    """Read the linked-document shapes used by both detail pages and landings."""
     if not isinstance(document, dict):
         return None, None
     link = document.get("link") if isinstance(document.get("link"), dict) else {}

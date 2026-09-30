@@ -6,7 +6,6 @@ from sqlalchemy.engine import make_url
 
 
 def postgres_connection_args():
-    """Common connection deadlines for both local PostgreSQL and verified TLS."""
     return {
         "connect_timeout": 5,
         "keepalives": 1,
@@ -22,7 +21,7 @@ def configuration():
     production = os.getenv("APP_ENV", "development") == "production"
     secret = os.getenv("SECRET_KEY")
     if not secret or len(secret) < 32:
-        raise RuntimeError("Задайте SECRET_KEY длиной не менее 32 символов в окружении.")
+        raise RuntimeError("SECRET_KEY отсутствует или короче 32 символов.")
     url = os.getenv("DATABASE_URL", "sqlite:///glorax-v2.db")
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -43,7 +42,7 @@ def configuration():
         if not url.startswith("postgresql"):
             raise RuntimeError("Production требует PostgreSQL.")
         if not ca or not Path(ca).is_file():
-            raise RuntimeError("Укажите существующий CA-файл PGSSLROOTCERT.")
+            raise RuntimeError("CA-файл PGSSLROOTCERT не найден.")
         if parsed.query.get("sslmode") not in (None, "verify-full"):
             raise RuntimeError("В production разрешён только sslmode=verify-full.")
         options["connect_args"].update(sslmode="verify-full", sslrootcert=str(ca))

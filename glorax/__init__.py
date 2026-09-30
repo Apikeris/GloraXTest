@@ -78,22 +78,16 @@ def create_app(test_config=None):
 
     @app.get("/healthz")
     def health():
-        # Liveness checks must prove the HTTP worker can answer. Do not make
-        # Render's router depend on Aiven: a transient database outage would
-        # otherwise make an otherwise-live web process appear dead and can
-        # leave users looking at a blank/502 page.
+
         return jsonify(status="ok")
 
     @app.get("/readyz")
     def readiness():
-        """Dependency check for operators; unlike /healthz this probes PostgreSQL."""
         try:
             with db.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             return jsonify(status="ok", database="ok")
         except Exception as exc:
-            # Pool counters contain no credentials or SQL, and distinguish a
-            # saturated pool from connection/TLS/database failures in Render.
             app.logger.warning(
                 "Database readiness check failed: %s; pool=%s",
                 type(exc).__name__,
@@ -122,12 +116,12 @@ def create_app(test_config=None):
     @app.errorhandler(HTTPException)
     def http_error(exc):
         message = {
-            400: "Проверьте данные запроса. Обновите страницу, если истёк срок формы.",
+            400: "Некорректный запрос.",
             403: "Доступ запрещён.",
             404: "Страница не найдена.",
-            409: "Данные изменились. Обновите страницу.",
+            409: "Данные изменились.",
             413: "Размер файла превышает 2 МБ.",
-            429: "Слишком много попыток. Повторите позже.",
+            429: "Слишком много попыток.",
         }.get(exc.code, exc.description)
         if request.path.startswith("/api/") or request.is_json:
             return jsonify(error=message), exc.code

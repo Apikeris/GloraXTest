@@ -1,5 +1,3 @@
-"""Administrative exchange; registered on the shared protected blueprint."""
-
 import json
 
 from flask import flash, render_template, request, session
@@ -62,7 +60,7 @@ def read_import_payload():
 
         return parse_payload(text)
     except (ValueError, TypeError):
-        raise ValueError("Некорректный JSON: проверьте кавычки, скобки и запятые")
+        raise ValueError("Некорректный JSON")
 
 
 @bp.route("/import", methods=["GET", "POST"])
@@ -102,7 +100,7 @@ def import_questions():
             errors = [
                 str(exc)
                 if not isinstance(exc, IntegrityError)
-                else "Конфликт импорта: данные были изменены. Повторите предпросмотр"
+                else "Конфликт импорта: данные были изменены"
             ]
     return render_template(
         "admin_import.html", payload=payload, preview=preview, errors=errors, report=report

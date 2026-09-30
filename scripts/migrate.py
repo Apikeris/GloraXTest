@@ -1,5 +1,3 @@
-"""One deployment migration process, serialized by a PostgreSQL session lock."""
-
 import argparse
 import sys
 from pathlib import Path
@@ -18,7 +16,7 @@ def prepare_database(app, enqueue_initial=False):
 
     def migrate_and_seed():
         upgrade(directory=str(Path(__file__).resolve().parent.parent / "migrations"))
-        # Existing queued/failed/successful work is never reset by a deployment.
+
         if (
             enqueue_initial
             and not db.session.scalar(
@@ -34,7 +32,7 @@ def prepare_database(app, enqueue_initial=False):
         if db.engine.dialect.name == "postgresql":
             with db.engine.connect() as lock:
                 acquired = lock.execute(text("SELECT pg_try_advisory_lock(73192042)")).scalar()
-                lock.commit()  # Session lock survives commit; avoid idle-in-transaction timeout.
+                lock.commit()
                 if not acquired:
                     print("Render: another migration owns the lock; retrying later", flush=True)
                     return False

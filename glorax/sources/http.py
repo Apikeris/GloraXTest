@@ -1,5 +1,3 @@
-"""Source http. External content is always treated as data."""
-
 from __future__ import annotations
 
 import re
@@ -20,8 +18,6 @@ from .common import (
 
 
 class RobotsRules:
-    """Wildcard-aware robots rules (longest rule wins; Allow wins a tie)."""
-
     def __init__(self, content):
         self.rules, self.delay = [], 0.4
         group_agents, group_rules, active_rules = [], [], False
@@ -153,11 +149,6 @@ class HTTPClient:
         raise SourceError("Исчерпаны повторы HTTP")
 
     def get_booklet_pdf(self, url, expected_size=None):
-        """Fetch only an explicitly linked project booklet from the observed CMS host.
-
-        robots.txt must be readable and allow the exact asset. A failed CMS host
-        disables further document requests for this run without failing HTML data.
-        """
         parsed = urlsplit(url)
         if (
             parsed.scheme != "https"

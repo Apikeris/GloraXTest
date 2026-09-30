@@ -1,5 +1,3 @@
-"""Source common. External content is always treated as data."""
-
 from __future__ import annotations
 
 import logging
@@ -20,7 +18,7 @@ USER_AGENT = "GloraXKnowledgeCollector/1.0"
 LOG = logging.getLogger(__name__)
 
 
-BOOKLET_HOST = "cms-dev.city-digital.ru"  # actual document host linked from project pages
+BOOKLET_HOST = "cms-dev.city-digital.ru"
 
 
 MAX_BOOKLET_BYTES = 30 * 1024 * 1024

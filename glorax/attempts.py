@@ -166,7 +166,6 @@ def expire_attempt(attempt, now=None, items=None):
 
 
 def sweep_expired():
-    """Lock only due attempts, in bounded batches, and load their items together."""
     now = server_now()
     cutoff = now - timedelta(minutes=int(get_setting("inactivity_minutes", 60)))
     expired_item = (
@@ -219,8 +218,7 @@ def result_data(attempt):
 
 @bp.get("/")
 def index():
-    # Render's port detector issues HEAD /. Do not make availability depend on
-    # PostgreSQL (the normal GET below performs several catalogue queries).
+
     if request.method == "HEAD":
         return Response(status=200)
     stage_started = time.monotonic()
@@ -286,7 +284,7 @@ def start_test():
     questions = select_questions(project)
     expected = request.form.get("expected_count")
     if expected and (not expected.isdigit() or int(expected) != len(questions)):
-        flash("Число доступных вопросов изменилось. Проверьте обновлённый каталог.", "error")
+        flash("Число доступных вопросов изменилось.", "error")
         return redirect("/")
     if not questions:
         flash("Тест пока недоступен: нет пригодных опубликованных вопросов.", "error")

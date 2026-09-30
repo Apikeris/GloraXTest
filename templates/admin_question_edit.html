@@ -1,1 +1,132 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf with context %}{% block heading %}Редактор вопроса{% endblock %}{% block admin_content %}{% if errors %}<div class="notice error">{% for e in errors %}<p>{{ e }}</p>{% endfor %}</div>{% endif %}{% if revision %}<section class="card"><span class="tag">{{ question_statuses[question.status] }}</span><h2>{{ revision.text }}</h2><ol>{% for o in revision.options %}<li>{{ o.text }} {% if o.id==revision.correct_option_id %}— правильный{% endif %}</li>{% endfor %}</ol><p>{{ revision.explanation }}</p><p class="muted">Версия {{ revision.id }} · {{ revision.created_at|admin_date }}</p><div class="actions">{% for k,v in question_statuses.items() %}<form method="post" action="{{ url_for('admin.question_status',question_id=question.id) }}">{{ csrf() }}<input type="hidden" name="status" value="{{ k }}"><button class="btn secondary">{{ v }}</button></form>{% endfor %}</div></section>{% endif %}<form method="post" class="card">{{ csrf() }}<label>Проект<select name="project_id" required>{% for p in projects %}<option value="{{ p.id }}" {% if question and question.project_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><label>Формулировка<textarea name="text" required maxlength="500">{{ revision.text if revision else '' }}</textarea></label><label>Категория<select name="category">{% for k,v in categories.items() %}<option value="{{ k }}" {% if revision and revision.category==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label><label>Целевой факт<select name="target_fact_revision_id" required><option value="">Выберите подтверждённый факт</option>{% for r,f,p in facts %}<option value="{{ r.id }}" {% if revision and revision.target_fact_revision_id==r.id %}selected{% endif %}>{{ p.name }} · {{ f.key }} · {{ r.value|string|truncate(90) }} · {{ f.scope|tojson }} · {{ r.id }}</option>{% endfor %}</select></label>{% for i in range(4) %}<label>Вариант {{ i+1 }} (текст формирует сервер)<select name="option_{{ i }}" required><option value="">Выберите факт</option>{% for r,f,p in facts %}<option value="{{ r.id }}" {% if revision and revision.options|length>i and revision.options[i].fact_revision_id==r.id %}selected{% endif %}>{{ p.name }} · {{ f.key }} · {{ r.value|string|truncate(90) }} · {{ r.id }}</option>{% endfor %}</select></label>{% endfor %}<label>Правильный вариант<select name="correct_option_id">{% for i in range(4) %}<option value="{{ i }}" {% if revision and revision.correct_option_id==i|string %}selected{% endif %}>{{ i+1 }}</option>{% endfor %}</select></label><label>Объяснение<textarea name="explanation" maxlength="2000">{{ revision.explanation if revision else '' }}</textarea></label><label>Сложность<select name="difficulty">{% for k,v in [('basic','Базовая'),('intermediate','Средняя'),('advanced','Сложная')] %}<option value="{{ k }}" {% if revision and revision.difficulty==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label><label>Теги через запятую<input name="tags" value="{{ revision.tags|join(', ') if revision else '' }}"></label><label><input type="checkbox" name="semantic_reviewed"> Я проверил, что формулировка и объяснение соответствуют источникам и правильный ответ единственный</label><p class="muted">Изменение создаёт новую версию и черновик. После сохранения нужна отдельная публикация. Старые попытки сохраняют свои снимки.</p><button>Сохранить черновик</button></form>{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf with context %}
+{% block heading %}Редактор вопроса{% endblock %}
+{% block admin_content %}
+    {% if errors %}
+        <div class="notice error">
+            {% for e in errors %}
+                <p>{{ e }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if revision %}
+        <section class="card">
+            <span class="tag">{{ question_statuses[question.status] }}</span>
+            <h2>{{ revision.text }}</h2>
+            <ol>
+                {% for o in revision.options %}
+                    <li>
+                        {{ o.text }}
+                        {% if o.id==revision.correct_option_id %}— правильный{% endif %}
+                    </li>
+                {% endfor %}
+            </ol>
+            <p>{{ revision.explanation }}</p>
+            <p class="muted">Версия {{ revision.id }} · {{ revision.created_at|admin_date }}</p>
+            <div class="actions">
+                {% for k,v in question_statuses.items() %}
+                    <form method="post"
+                          action="{{ url_for('admin.question_status',question_id=question.id) }}">
+                        {{ csrf() }}
+                        <input type="hidden" name="status" value="{{ k }}">
+                        <button class="btn secondary">{{ v }}</button>
+                    </form>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+    <form method="post" class="card">
+        {{ csrf() }}
+        <label>
+            Проект
+            <select name="project_id" required>
+                {% for p in projects %}
+                    <option value="{{ p.id }}"
+                            {% if question and question.project_id==p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Формулировка
+            <textarea name="text"
+                      required
+                      maxlength="500">{{ revision.text if revision else '' }}</textarea>
+        </label>
+        <label>
+            Категория
+            <select name="category">
+                {% for k,v in categories.items() %}
+                    <option value="{{ k }}"
+                            {% if revision and revision.category==k %}selected{% endif %}>
+                        {{ v }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Целевой факт
+            <select name="target_fact_revision_id" required>
+                <option value="">Выберите подтверждённый факт</option>
+                {% for r,f,p in facts %}
+                    <option value="{{ r.id }}"
+                            {% if revision and revision.target_fact_revision_id==r.id %}selected{% endif %}>
+                        {{ p.name }} · {{ f.key }} · {{ r.value|string|truncate(90) }} · {{ f.scope|tojson }} · {{ r.id }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        {% for i in range(4) %}
+            <label>
+                Вариант {{ i+1 }} (текст формирует сервер)
+                <select name="option_{{ i }}" required>
+                    <option value="">Выберите факт</option>
+                    {% for r,f,p in facts %}
+                        <option value="{{ r.id }}"
+                                {% if revision and revision.options|length>i and revision.options[i].fact_revision_id==r.id %}selected{% endif %}>{{ p.name }} · {{ f.key }} · {{ r.value|string|truncate(90) }} · {{ r.id }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </label>
+        {% endfor %}
+        <label>
+            Правильный вариант
+            <select name="correct_option_id">
+                {% for i in range(4) %}
+                    <option value="{{ i }}"
+                            {% if revision and revision.correct_option_id==i|string %}selected{% endif %}>
+                        {{ i+1 }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Объяснение
+            <textarea name="explanation"
+                      maxlength="2000">{{ revision.explanation if revision else '' }}</textarea>
+        </label>
+        <label>
+            Сложность
+            <select name="difficulty">
+                {% for k,v in [('basic','Базовая'),('intermediate','Средняя'),('advanced','Сложная')] %}
+                    <option value="{{ k }}"
+                            {% if revision and revision.difficulty==k %}selected{% endif %}>
+                        {{ v }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Теги через запятую
+            <input name="tags"
+                   value="{{ revision.tags|join(', ') if revision else '' }}">
+        </label>
+        <label>
+            <input type="checkbox" name="semantic_reviewed">
+            Я проверил, что формулировка и объяснение соответствуют источникам и правильный ответ единственный
+        </label>
+        <p class="muted">Изменение создаёт новую версию и черновик. После сохранения нужна отдельная публикация. Старые попытки сохраняют свои снимки.</p>
+        <button>Сохранить черновик</button>
+    </form>
+{% endblock %}

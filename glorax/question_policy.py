@@ -1,5 +1,3 @@
-"""Shared rules for the content of newly assigned tests."""
-
 from sqlalchemy import and_, func, not_, or_
 
 from .question_values import canonical_unit
@@ -17,7 +15,6 @@ APARTMENT_AREA_KEYS = {
 
 
 def area_policy_error(fact, revision):
-    """Keep only an explicitly scoped studio maximum among apartment areas."""
     is_area = fact.key in APARTMENT_AREA_KEYS or (
         fact.category == "layouts" and canonical_unit(revision.unit) == "m2"
     )
@@ -30,7 +27,6 @@ def area_policy_error(fact, revision):
 
 
 def area_policy_clause(fact_model, revision_model):
-    """SQL equivalent for catalogue counts, without loading the question bank."""
     is_area = or_(
         fact_model.key.in_(APARTMENT_AREA_KEYS),
         and_(
@@ -42,6 +38,5 @@ def area_policy_clause(fact_model, revision_model):
         fact_model.key.in_(("max_area", "studio_max_area")),
         fact_model.scope["rooms"].as_string() == "0",
     )
-    # COALESCE preserves non-area facts with NULL units/scopes under SQL's
-    # three-valued logic. Missing room scope can never prove a studio maximum.
+
     return or_(not_(func.coalesce(is_area, False)), func.coalesce(studio_maximum, False))

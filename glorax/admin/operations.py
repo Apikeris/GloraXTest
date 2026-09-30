@@ -1,5 +1,3 @@
-"""Administrative operations; registered on the shared protected blueprint."""
-
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 
 from ..extensions import db

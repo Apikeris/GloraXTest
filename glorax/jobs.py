@@ -1,5 +1,3 @@
-"""PostgreSQL queue: durable state, unique active job, leases and fencing."""
-
 import re
 from datetime import datetime, timedelta
 
@@ -12,7 +10,6 @@ from .models import Job, Setting, aware, uid, utcnow
 
 
 def worker_heartbeat():
-    """A shared health timestamp, including when the durable queue is empty."""
     value = utcnow().isoformat()
     db.session.execute(
         insert(Setting)
@@ -30,11 +27,7 @@ def worker_diagnostics(job=None):
         seen = None
     now = utcnow()
     online = bool(seen and (now - aware(seen)).total_seconds() < 60)
-    message = (
-        "Worker подключён к очереди."
-        if online
-        else "Нет свежего сигнала worker. На бесплатном Render задания должны запускаться отдельным расписанием. Во время сна сервиса задания не выполняются."
-    )
+    message = "Worker подключён к очереди." if online else "Нет связи с обработчиком заданий."
     if job is None:
         job = db.session.scalar(db.select(Job).where(Job.active_key == "refresh"))
     if (
@@ -44,9 +37,9 @@ def worker_diagnostics(job=None):
         and (now - aware(job.heartbeat_at)).total_seconds()
         < current_app.config.get("WORKER_LEASE_SECONDS", 600)
     ):
-        message = "Сбор выполняется. Последний этап и время сигнала приведены ниже."
+        message = "Сбор выполняется."
     if job and job.state == "queued" and aware(job.available_at) > now:
-        message = "Ожидание автоматического повтора после ошибки. Для повтора worker должен оставаться запущенным."
+        message = "Ожидание повторной попытки."
     return {
         "online": online,
         "last_seen_at": seen.isoformat() if seen else None,
@@ -55,14 +48,13 @@ def worker_diagnostics(job=None):
 
 
 def safe_job_error(exc):
-    """SQLSTATE is useful diagnostics; raw SQL/driver messages can expose secrets."""
     from .parser import SourceError
 
     if isinstance(exc, DBAPIError):
         state = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
         state = state if isinstance(state, str) and re.fullmatch(r"[0-9A-Z]{5}", state) else None
         reason = {
-            "53300": "Достигнут лимит подключений Aiven. Уменьшите DB_POOL_SIZE и DB_MAX_OVERFLOW.",
+            "53300": "Достигнут лимит подключений к БД.",
             "53200": "PostgreSQL сообщил о нехватке памяти.",
             "57014": "Запрос отменён или превысил серверный таймаут.",
             "25P03": "PostgreSQL закрыл простаивающую транзакцию.",
@@ -70,7 +62,7 @@ def safe_job_error(exc):
             "57P01": "PostgreSQL перезапускается или остановлен.",
         }.get(
             state,
-            "Соединение с PostgreSQL прервано или запрос отклонён. Проверьте доступность Aiven и лимит подключений.",
+            "Соединение с PostgreSQL прервано или запрос отклонён.",
         )
         return f"Ошибка БД ({type(exc).__name__}; SQLSTATE {state or 'не получен'}): {reason}"
     return (
@@ -157,7 +149,7 @@ def run_job(job_id, token, collector=None):
     collector = collector or scrape
 
     def guard():
-        # Row lock is held during publication; an expired worker cannot publish.
+
         job = db.session.execute(
             db.select(Job)
             .where(Job.id == job_id)
@@ -209,7 +201,6 @@ def run_job(job_id, token, collector=None):
             db.select(Job).where(Job.id == job_id).with_for_update()
         ).scalar_one_or_none()
         if job and job.lease_token == token and job.state == "running":
-            # Do not expose exception messages from drivers (may contain credentials).
             safe = safe_job_error(exc)
             current_app.logger.error("Refresh failed: job=%s stage=%s %s", job_id, job.stage, safe)
             job.error = safe

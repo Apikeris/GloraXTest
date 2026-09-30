@@ -1,1 +1,48 @@
-{% extends 'admin_base.html' %}{% from 'admin_macros.html' import csrf with context %}{% block heading %}Промпт для нейросети{% endblock %}{% block admin_content %}{% for e in errors %}<p class="notice error">{{ e }}</p>{% endfor %}<p>Экспорт содержит только разрешённые факты и их источники. ФИО и результаты сотрудников не включаются. API-ключ не требуется.</p><form method="post" class="card">{{ csrf() }}<label>Проект<select name="project_id" required>{% for p in projects %}<option value="{{ p.id }}" {% if request.form.get('project_id')==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><label>Желаемое количество<input name="count" type="number" min="1" max="100" value="10" required></label><label>Темы через запятую (пусто — все)<input name="themes" placeholder="location, buildings, layouts"></label><label>Сложность<select name="difficulty"><option value="basic">Базовая</option><option value="intermediate">Средняя</option><option value="advanced">Сложная</option></select></label><button>Сформировать промпт</button></form>{% if prompt %}<section class="card"><button type="button" id="copy-prompt">Скопировать промпт для нейросети</button><p id="copy-status" role="status"></p><textarea id="ai-prompt" rows="22" readonly>{{ prompt }}</textarea><a href="{{ url_for('admin.import_questions') }}">Перейти к проверке JSON-ответа →</a></section>{% endif %}{% endblock %}
+{% extends "admin_base.html" %}
+{% from 'admin_macros.html' import csrf with context %}
+{% block heading %}Промпт для нейросети{% endblock %}
+{% block admin_content %}
+    {% for e in errors %}
+        <p class="notice error">{{ e }}</p>
+    {% endfor %}
+    <p>Экспорт содержит только разрешённые факты и их источники. ФИО и результаты сотрудников не включаются. API-ключ не требуется.</p>
+    <form method="post" class="card">
+        {{ csrf() }}
+        <label>
+            Проект
+            <select name="project_id" required>
+                {% for p in projects %}
+                    <option value="{{ p.id }}"
+                            {% if request.form.get('project_id')==p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Желаемое количество
+            <input name="count" type="number" min="1" max="100" value="10" required>
+        </label>
+        <label>
+            Темы через запятую (пусто — все)
+            <input name="themes" placeholder="location, buildings, layouts">
+        </label>
+        <label>
+            Сложность
+            <select name="difficulty">
+                <option value="basic">Базовая</option>
+                <option value="intermediate">Средняя</option>
+                <option value="advanced">Сложная</option>
+            </select>
+        </label>
+        <button>Сформировать промпт</button>
+    </form>
+    {% if prompt %}
+        <section class="card">
+            <button type="button" id="copy-prompt">Скопировать промпт для нейросети</button>
+            <p id="copy-status" role="status"></p>
+            <textarea id="ai-prompt" rows="22" readonly>{{ prompt }}</textarea>
+            <a href="{{ url_for('admin.import_questions') }}">Перейти к проверке JSON-ответа →</a>
+        </section>
+    {% endif %}
+{% endblock %}

@@ -1,5 +1,3 @@
-"""Administrative projects; registered on the shared protected blueprint."""
-
 import json
 from decimal import InvalidOperation
 
@@ -17,9 +15,7 @@ def projects():
     from ..catalogue import available_question_counts
 
     values = project_list()
-    # Publication already performed deep validation. Use the grouped SQL
-    # counter shared with the employee catalogue instead of revalidating each
-    # question serially for every project on every admin page load.
+
     counts = available_question_counts(values)
     return render_template("admin_projects.html", projects=values, counts=counts)
 

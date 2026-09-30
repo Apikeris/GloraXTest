@@ -1,6 +1,75 @@
-{% extends 'admin_base.html' %}
+{% extends "admin_base.html" %}
 {% block heading %}Разбор попытки{% endblock %}
 {% block admin_content %}
-<section class="card"><h2>{{ attempt.full_name }} · {{ attempt.project_name }}</h2><p>{{ attempt_statuses[attempt.status] }} · {% if attempt.legacy_data %}Сохранённый балл: {{ attempt.score }} · Размер теста и процент неизвестны{% else %}{{ attempt.score }} / {{ attempt.total }} · {{ (100*attempt.score/attempt.total)|round(1) if attempt.total else 0 }}%{% endif %}</p><p>ID попытки: <code>{{ attempt.id }}</code><br>Участник: <a href="{{ url_for('admin.attempts', participant_id=attempt.participant_id) }}">{{ attempt.participant_id }}</a><br>Начало: {{ attempt.started_at|admin_date }} · Окончание: {{ attempt.finished_at|admin_date }}<br>Снимок датасета: <code>{{ attempt.dataset_id or 'Не был сохранён' }}</code></p><details><summary>Параметры теста</summary><pre>{{ attempt.settings|tojson(indent=2) }}</pre></details>{% if attempt.legacy_data %}<p class="alert">Историческая попытка. Утраченные формулировки и порядок ответов не восстанавливались.</p><details><summary>Сохранившиеся старые сведения</summary><pre>{{ attempt.legacy_data|tojson(indent=2) }}</pre></details>{% endif %}</section>
-{% for item in items %}<section class="card"><p class="muted">Вопрос {{ loop.index }} · {{ categories.get(item.snapshot.get('category'), item.snapshot.get('category','Категория не сохранена')) }} · {{ outcomes[item.outcome] }}</p><h2>{{ item.snapshot.get('text') or 'Формулировка не сохранена' }}</h2>{% if item.snapshot.get("legacy_log") %}<pre>{{ item.snapshot.legacy_log|tojson(indent=2) }}</pre>{% endif %}<ol class="answer-list">{% for option in item.snapshot.get('options',[]) %}<li class="{% if option.id==item.snapshot.get('correct_option_id') %}correct{% elif option.id==item.selected_option_id %}incorrect{% endif %}">{{ option.text }} {% if option.id==item.selected_option_id %}<strong>— выбран</strong>{% endif %}{% if option.id==item.snapshot.get('correct_option_id') %}<strong>— правильный</strong>{% endif %}<br><small>Версия факта: {{ option.fact_revision_id or 'Не сохранена' }}</small></li>{% else %}<li>Варианты и их порядок не сохранены в старой базе</li>{% endfor %}</ol><p>{{ item.snapshot.get('explanation', '') }}</p><p class="muted">Открыт: {{ item.opened_at|admin_date }}<br>Дедлайн: {{ item.deadline|admin_date }}<br>Принят ответ: {{ item.accepted_at|admin_date }} · Время ответа: {{ (item.response_ms/1000)|round(2) ~ ' с' if item.response_ms is not none else '—' }}</p></section>{% else %}<p class="card">Детальные записи не сохранились.</p>{% endfor %}
+    <section class="card">
+        <h2>{{ attempt.full_name }} · {{ attempt.project_name }}</h2>
+        <p>
+            {{ attempt_statuses[attempt.status] }} · {% if attempt.legacy_data %}Сохранённый балл: {{ attempt.score }} · Размер теста и процент неизвестны{% else %}
+            {{ attempt.score }} / {{ attempt.total }} · {{ (100*attempt.score/attempt.total)|round(1) if attempt.total else 0 }}%{% endif %}
+    </p>
+    <p>
+        ID попытки: <code>
+        {{ attempt.id }}
+        </code>
+        <br>
+        Участник: <a href="{{ url_for('admin.attempts', participant_id=attempt.participant_id) }}">
+        {{ attempt.participant_id }}
+        </a>
+        <br>
+        Начало: {{ attempt.started_at|admin_date }} · Окончание: {{ attempt.finished_at|admin_date }}
+        <br>
+        Снимок датасета: <code>
+        {{ attempt.dataset_id or 'Не был сохранён' }}
+        </code>
+    </p>
+    <details>
+        <summary>Параметры теста</summary>
+        <pre>{{ attempt.settings|tojson(indent=2) }}</pre>
+    </details>
+    {% if attempt.legacy_data %}
+        <p class="alert">Историческая попытка. Утраченные формулировки и порядок ответов не восстанавливались.</p>
+        <details>
+            <summary>Сохранившиеся старые сведения</summary>
+            <pre>{{ attempt.legacy_data|tojson(indent=2) }}</pre>
+        </details>
+    {% endif %}
+</section>
+{% for item in items %}
+    <section class="card">
+        <p class="muted">
+            Вопрос {{ loop.index }} · {{ categories.get(item.snapshot.get('category'), item.snapshot.get('category','Категория не сохранена')) }} · {{ outcomes[item.outcome] }}
+        </p>
+        <h2>{{ item.snapshot.get("text") or 'Формулировка не сохранена' }}</h2>
+        {% if item.snapshot.get("legacy_log") %}
+            <pre>{{ item.snapshot.legacy_log|tojson(indent=2) }}</pre>
+        {% endif %}
+        <ol class="answer-list">
+            {% for option in item.snapshot.get('options',[]) %}
+                <li class="{% if option.id==item.snapshot.get('correct_option_id') %}correct{% elif option.id==item.selected_option_id %}incorrect{% endif %}">
+                    {{ option.text }}
+                    {% if option.id==item.selected_option_id %}
+                        <strong>— выбран</strong>
+                    {% endif %}
+                    {% if option.id==item.snapshot.get("correct_option_id") %}
+                        <strong>— правильный</strong>
+                    {% endif %}
+                    <br>
+                    <small>Версия факта: {{ option.fact_revision_id or 'Не сохранена' }}</small>
+                </li>
+            {% else %}
+                <li>Варианты и их порядок не сохранены в старой базе</li>
+            {% endfor %}
+        </ol>
+        <p>{{ item.snapshot.get('explanation', '') }}</p>
+        <p class="muted">
+            Открыт: {{ item.opened_at|admin_date }}
+            <br>
+            Дедлайн: {{ item.deadline|admin_date }}
+            <br>
+            Принят ответ: {{ item.accepted_at|admin_date }} · Время ответа: {{ (item.response_ms/1000)|round(2) ~ ' с' if item.response_ms is not none else '—' }}
+        </p>
+    </section>
+{% else %}
+    <p class="card">Детальные записи не сохранились.</p>
+{% endfor %}
 {% endblock %}
